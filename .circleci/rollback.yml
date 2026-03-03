@@ -1,0 +1,124 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@5.4.1
+
+executors:
+  deploy:
+    docker:
+      - image: cimg/deploy:2025.01.1-node
+    resource_class: small
+
+commands:
+  install-argo-rollouts-plugin:
+    description: Install kubectl argo rollouts plugin
+    steps:
+      - run:
+          name: Install kubectl-argo-rollouts plugin
+          command: |
+            curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+            chmod +x kubectl-argo-rollouts-linux-amd64
+            sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+  setup-eks:
+    parameters:
+      aws-region:
+        type: string
+      cluster-name:
+        type: string
+    steps:
+      - aws-cli/setup:
+          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          region: << parameters.aws-region >>
+          profile_name: circleci-oidc
+          role_session_name: circleci-rollback-<< pipeline.number >>
+          session_duration: "1800"
+      - run:
+          name: Configure kubectl
+          command: aws eks update-kubeconfig --name << parameters.cluster-name >> --region << parameters.aws-region >> --profile circleci-oidc
+
+  log-snowflake:
+    parameters:
+      event:
+        type: string
+    steps:
+      - run:
+          name: Log to Snowflake
+          command: |
+            echo "Snowflake: << parameters.event >> | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+jobs:
+  rollback-region:
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+      aws-region:
+        type: string
+      cluster-name:
+        type: string
+      environment-name:
+        type: string
+    executor: deploy
+    steps:
+      - checkout
+      - run:
+          name: Display << pipeline.deploy.component_name >> rollback info
+          command: |
+            echo "======================================"
+            echo "Rollback Information - << parameters.region >>"
+            echo "======================================"
+            echo "Component:       << pipeline.deploy.component_name >>"
+            echo "Rolling back to: << pipeline.deploy.target_version >>"
+            echo "Current version: << pipeline.deploy.current_version >>"
+            echo "Namespace:       << pipeline.deploy.namespace >>"
+            echo "Environment:     << parameters.environment-name >>"
+            echo "Reason:          << pipeline.deploy.reason >>"
+            echo "======================================"
+      - setup-eks:
+          aws-region: << parameters.aws-region >>
+          cluster-name: << parameters.cluster-name >>
+      - install-argo-rollouts-plugin
+      - run:
+          name: Abort << pipeline.deploy.component_name >> in-progress rollout [<< parameters.region >>]
+          command: kubectl-argo-rollouts abort << pipeline.deploy.component_name >> -n << pipeline.deploy.namespace >> || true
+      - run:
+          name: Deploy << pipeline.deploy.component_name >>:<< pipeline.deploy.target_version >> [<< parameters.region >>]
+          command: |
+            helm upgrade --atomic --install << pipeline.deploy.component_name >> ./helm \
+              --namespace << pipeline.deploy.namespace >> \
+              --set fullnameOverride=<< pipeline.deploy.component_name >> \
+              --set image.tag=<< pipeline.deploy.target_version >> \
+              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set rollout.enabled=true \
+              --set region=<< parameters.region >> \
+              --set istio.gateway=istio-ingress/<< parameters.region >>-istio-gateway-subdomains \
+              --set circleci.componentName=<< pipeline.deploy.component_name >> \
+              --set circleci.version=<< pipeline.deploy.target_version >>
+      - run:
+          name: Wait for << pipeline.deploy.component_name >> rollback to complete [<< parameters.region >>]
+          command: |
+            kubectl-argo-rollouts status << pipeline.deploy.component_name >> -n << pipeline.deploy.namespace >> --timeout=300s
+            echo ""
+            echo "Rollback completed successfully!"
+      - log-snowflake:
+          event: rollback_success_<< parameters.region >>
+
+workflows:
+  rollback:
+    jobs:
+      - rollback-region:
+          name: Rollback Production NA
+          region: namer
+          aws-region: us-west-2
+          cluster-name: cera-usw2-namer
+          environment-name: Car-Gurus-Multi-Repo-Production-NA
+          context: [cargurus_demo, cargurus-oidc]
+
+      - rollback-region:
+          name: Rollback Production EU
+          region: emea
+          aws-region: eu-west-2
+          cluster-name: cera-euw2-emea
+          environment-name: Car-Gurus-Multi-Repo-Production-EU
+          context: [cargurus_demo, cargurus-oidc]

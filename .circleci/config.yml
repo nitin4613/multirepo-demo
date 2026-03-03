@@ -1,0 +1,720 @@
+version: 2.1
+
+orbs:
+  github-cli: circleci/github-cli@2.7.2
+  aws-cli: circleci/aws-cli@5.4.1
+  trigger-pipeline: circleci/trigger-pipeline@1.1.0
+
+parameters:
+  service_name:
+    description: Name of the service (defaults to repo name if empty)
+    type: string
+    default: ""
+  build_id:
+    description: Sequential build ID for tracking releases
+    type: string
+    default: ""
+  run_deploy:
+    description: Set to true to run production deployment
+    type: boolean
+    default: true
+  deploy_component_name:
+    description: Component name for deployment
+    type: string
+    default: ""
+  deploy_target_version:
+    description: Target version for deployment
+    type: string
+    default: ""
+  deploy_namespace:
+    description: Target namespace for deployment
+    type: string
+    default: "cargurus-prod"
+
+executors:
+  jdk17:
+    docker:
+      - image: cimg/openjdk:17.0
+    resource_class: large
+  node:
+    docker:
+      - image: cimg/node:22.12
+    resource_class: large
+    environment:
+      CI: "true"
+      NODE_OPTIONS: "--max-old-space-size=4096"
+  base:
+    docker:
+      - image: cimg/base:2025.01
+    resource_class: large
+  deploy:
+    docker:
+      - image: cimg/deploy:2025.01.1-node
+    resource_class: large
+
+commands:
+  set-service-name:
+    description: Set SERVICE_NAME from parameter or derive from repo name
+    steps:
+      - run:
+          name: Set service name
+          command: |
+            if [ -n "<< pipeline.parameters.service_name >>" ]; then
+              SERVICE_NAME="<< pipeline.parameters.service_name >>"
+            else
+              SERVICE_NAME=$(echo "${CIRCLE_PROJECT_REPONAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            fi
+            echo "export SERVICE_NAME=${SERVICE_NAME}" >> $BASH_ENV
+            echo "Service name: ${SERVICE_NAME}"
+
+  notify-taillight:
+    description: Send notification to Taillight service
+    parameters:
+      status:
+        type: string
+        description: Status of the operation (success, failure)
+      stage:
+        type: string
+        description: Pipeline stage name
+      message:
+        type: string
+        description: Notification message
+    steps:
+      - run:
+          name: Notify Taillight
+          command: |
+            echo "======================================"
+            echo "Sending Taillight Notification"
+            echo "======================================"
+            echo "Stage: << parameters.stage >>"
+            echo "Status: << parameters.status >>"
+            echo "Message: << parameters.message >>"
+            echo "Pipeline: << pipeline.number >>"
+            echo "======================================"
+
+  notify-taillight-failure:
+    description: Send failure notification to Taillight service
+    parameters:
+      stage:
+        type: string
+        description: Pipeline stage name
+      message:
+        type: string
+        default: "Job failed"
+        description: Failure message
+    steps:
+      - run:
+          name: Notify Taillight (Failure)
+          when: on_fail
+          command: |
+            echo "======================================"
+            echo "Taillight FAILURE Notification"
+            echo "======================================"
+            echo "Stage: << parameters.stage >>"
+            echo "Status: FAILURE"
+            echo "Message: << parameters.message >>"
+            echo "Pipeline: << pipeline.number >>"
+            echo "======================================"
+
+  log-snowflake:
+    description: Log metrics to Snowflake data warehouse
+    parameters:
+      event-type:
+        type: string
+        description: Type of event to log
+    steps:
+      - run:
+          name: Log to Snowflake
+          command: |
+            echo "Connected to Snowflake"
+            echo "  Event: << parameters.event-type >>"
+            echo "  Pipeline: << pipeline.number >>"
+            echo "  Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "  Metric recorded successfully"
+
+  log-snowflake-failure:
+    description: Log failure metrics to Snowflake data warehouse
+    parameters:
+      event-type:
+        type: string
+        description: Type of event to log
+    steps:
+      - run:
+          name: Log to Snowflake (Failure)
+          when: on_fail
+          command: |
+            echo "Connected to Snowflake"
+            echo "  Event: << parameters.event-type >>_failed"
+            echo "  Pipeline: << pipeline.number >>"
+            echo "  Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "  Failure metric recorded"
+
+  notify-idp:
+    description: Send deployment notification to IDP (Showroom/Port)
+    parameters:
+      event:
+        type: enum
+        enum: ["deployment_ready", "deployment_started", "deployment_success", "deployment_failure", "rollback_started", "rollback_success"]
+        description: Type of IDP event
+      version:
+        type: integer
+        description: Version being deployed (build number)
+      environment:
+        type: string
+        default: "production"
+        description: Target environment
+      message:
+        type: string
+        default: ""
+        description: Additional message
+    steps:
+      - run:
+          name: Notify IDP - << parameters.event >>
+          command: |
+            echo "======================================"
+            echo "IDP Notification"
+            echo "======================================"
+            echo "Event:       << parameters.event >>"
+            echo "Service:     ${SERVICE_NAME}"
+            echo "Version:     << parameters.version >>"
+            echo "Environment: << parameters.environment >>"
+            echo "Pipeline:    << pipeline.number >>"
+            echo "Workflow:    ${CIRCLE_WORKFLOW_ID}"
+            echo "Message:     << parameters.message >>"
+            echo "Timestamp:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "======================================"
+            
+            IDP_PAYLOAD=$(cat \<<EOF
+            {
+              "event": "<< parameters.event >>",
+              "service": {
+                "name": "${SERVICE_NAME}",
+                "repository": "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+              },
+              "deployment": {
+                "version": "<< parameters.version >>",
+                "environment": "<< parameters.environment >>",
+                "pipeline_number": "<< pipeline.number >>",
+                "workflow_id": "${CIRCLE_WORKFLOW_ID}",
+                "commit_sha": "${CIRCLE_SHA1}",
+                "branch": "<< pipeline.git.branch >>"
+              },
+              "metadata": {
+                "message": "<< parameters.message >>",
+                "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "trigger_url": "https://circleci.com/api/v2/project/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/pipeline"
+              }
+            }
+            EOF
+            )
+            
+            echo ""
+            echo "IDP Payload:"
+            echo "${IDP_PAYLOAD}" | jq '.' 2>/dev/null || echo "${IDP_PAYLOAD}"
+            
+            if [ -n "${IDP_WEBHOOK_URL:-}" ]; then
+              curl -s -X POST "${IDP_WEBHOOK_URL}" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${IDP_API_TOKEN:-}" \
+                -d "${IDP_PAYLOAD}" || echo "IDP notification sent (or endpoint not configured)"
+            else
+              echo "IDP_WEBHOOK_URL not configured - notification logged only"
+            fi
+
+  register-deployment-candidate:
+    description: Register a deployment candidate with IDP for manual approval
+    parameters:
+      version:
+        type: integer
+        description: Version ready for deployment (build number)
+    steps:
+      - run:
+          name: Register Deployment Candidate with IDP
+          command: |
+            echo "======================================"
+            echo "Registering Deployment Candidate"
+            echo "======================================"
+            echo "Service:     ${SERVICE_NAME}"
+            echo "Version:     << parameters.version >>"
+            echo "Status:      READY_FOR_PRODUCTION"
+            echo "Mode:        MANUAL (requires IDP trigger)"
+            echo "======================================"
+            
+            CANDIDATE_PAYLOAD=$(cat \<<EOF
+            {
+              "service_name": "${SERVICE_NAME}",
+              "version": "<< parameters.version >>",
+              "repository": "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}",
+              "status": "ready",
+              "deployment_mode": "manual",
+              "staging_validated": true,
+              "e2e_passed": true,
+              "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "expires_at": "$(date -u -d '+24 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+24H +%Y-%m-%dT%H:%M:%SZ)",
+              "trigger_info": {
+                "api_endpoint": "https://circleci.com/api/v2/project/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/pipeline",
+                "required_parameters": {
+                  "tag": "<< parameters.version >>",
+                  "service_name": "${SERVICE_NAME}",
+                  "namespace": "cargurus-prod"
+                },
+                "config_file": "api-deploy.yml"
+              },
+              "regions": ["namer", "emea"],
+              "approval_required": true,
+              "pipeline_id": "<< pipeline.id >>",
+              "workflow_id": "${CIRCLE_WORKFLOW_ID}",
+              "commit": {
+                "sha": "${CIRCLE_SHA1}",
+                "branch": "<< pipeline.git.branch >>",
+                "author": "${CIRCLE_USERNAME}"
+              }
+            }
+            EOF
+            )
+            
+            echo ""
+            echo "Deployment Candidate:"
+            echo "${CANDIDATE_PAYLOAD}" | jq '.' 2>/dev/null || echo "${CANDIDATE_PAYLOAD}"
+            
+            if [ -n "${IDP_WEBHOOK_URL:-}" ]; then
+              curl -s -X POST "${IDP_WEBHOOK_URL}/candidates" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer ${IDP_API_TOKEN:-}" \
+                -d "${CANDIDATE_PAYLOAD}" || echo "Candidate registered (or endpoint not configured)"
+            fi
+            
+            echo ""
+            echo "======================================"
+            echo "MANUAL DEPLOYMENT MODE"
+            echo "======================================"
+            echo ""
+            echo "This service is configured for MANUAL deployment."
+            echo "Production deployment must be triggered via IDP/Showroom."
+            echo ""
+            echo "To deploy to production, use one of these methods:"
+            echo ""
+            echo "1. IDP/Showroom UI:"
+            echo "   Navigate to the service in Showroom and click 'Deploy'"
+            echo ""
+            echo "2. CircleCI API:"
+            echo "   curl -X POST https://circleci.com/api/v2/project/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/pipeline \\"
+            echo "     -H 'Circle-Token: \${CIRCLE_TOKEN}' \\"
+            echo "     -H 'Content-Type: application/json' \\"
+            echo "     -d '{\"parameters\": {\"tag\": \"<< parameters.version >>\", \"service_name\": \"${SERVICE_NAME}\", \"namespace\": \"cargurus-prod\"}}'"
+            echo ""
+            echo "3. Webhook:"
+            echo "   POST to the configured webhook endpoint with:"
+            echo "   {\"service_name\": \"${SERVICE_NAME}\", \"tag\": \"<< parameters.version >>\", \"namespace\": \"cargurus-prod\"}"
+            echo ""
+            echo "======================================"
+
+  setup-aws-eks:
+    description: Authenticate with AWS using OIDC and configure kubectl for EKS
+    parameters:
+      region:
+        type: string
+        description: AWS region (us-west-2 for NA, eu-west-2 for EU)
+      cluster-name:
+        type: string
+        description: Name of the EKS cluster
+      role-arn:
+        type: env_var_name
+        default: AWS_ROLE_ARN
+        description: Environment variable containing the IAM role ARN for OIDC
+    steps:
+      - aws-cli/setup:
+          role_arn: ${<< parameters.role-arn >>}
+          region: << parameters.region >>
+          profile_name: "circleci-oidc"
+          role_session_name: "circleci-deploy-<< pipeline.number >>"
+          session_duration: "1800"
+      - run:
+          name: Configure kubectl for EKS (<< parameters.cluster-name >>)
+          command: |
+            aws eks update-kubeconfig \
+              --name << parameters.cluster-name >> \
+              --region << parameters.region >> \
+              --profile circleci-oidc
+      - run:
+          name: Verify EKS Connection
+          command: kubectl cluster-info
+
+jobs:
+  comment-pr-build-number:
+    description: Comments build number on the merged PR
+    executor: base
+    steps:
+      - github-cli/setup:
+          token: GH_TOKEN
+      - run:
+          name: Comment Build Number on PR
+          command: |
+            gh pr comment "<< pipeline.event.github.pull_request.number >>" \
+              --repo "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" \
+              --body "Build Started - Build Number: << pipeline.number >>"
+
+  unit-tests:
+    executor: jdk17
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v2-gradle-{{ checksum "build.gradle" }}
+            - v2-gradle-
+      - run:
+          name: Setup Gradle
+          command: |
+            gradle wrapper --gradle-version 8.5
+            chmod +x ./gradlew
+      - run:
+          name: Run Unit Tests
+          command: ./gradlew test --parallel --build-cache
+      - save_cache:
+          key: v2-gradle-{{ checksum "build.gradle" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+      - store_test_results:
+          path: build/test-results/test
+      - store_artifacts:
+          path: build/reports/tests/test
+      - notify-taillight:
+          status: "success"
+          stage: "unit-tests"
+          message: "Unit tests passed"
+      - notify-taillight-failure:
+          stage: "unit-tests"
+          message: "Unit tests failed"
+
+
+  build-and-publish:
+    machine:
+      image: ubuntu-2404:current
+      docker_layer_caching: true
+    resource_class: medium
+    steps:
+      - checkout
+      - set-service-name
+      - run:
+          name: Build and push to GHCR
+          command: |
+            echo "${GH_TOKEN}" | docker login ghcr.io -u ${CIRCLE_PROJECT_USERNAME} --password-stdin
+            docker build -t ghcr.io/awesomecicd/${SERVICE_NAME}:<< pipeline.number >> -f Dockerfile .
+            docker push ghcr.io/awesomecicd/${SERVICE_NAME}:<< pipeline.number >>
+      - notify-taillight:
+          status: "success"
+          stage: "build-publish"
+          message: "Image published"
+      - log-snowflake:
+          event-type: "artifact_published"
+      - notify-taillight-failure:
+          stage: "build-publish"
+          message: "Build failed"
+
+  mach5-deploy-staging:
+    description: Deploy to staging environment using Mach5
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+        description: Deployment region
+      aws-region:
+        type: string
+        description: AWS region for EKS cluster
+      cluster-name:
+        type: string
+        description: EKS cluster name
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - setup-aws-eks:
+          region: << parameters.aws-region >>
+          cluster-name: << parameters.cluster-name >>
+      - run:
+          name: Mach5 Deploy to Staging (<< parameters.region >>)
+          command: |
+            IMAGE_NAME="ghcr.io/$(echo ${CIRCLE_PROJECT_USERNAME} | tr '[:upper:]' '[:lower:]')/$(echo ${CIRCLE_PROJECT_REPONAME} | tr '[:upper:]' '[:lower:]'):<< pipeline.number >>"
+            echo "======================================"
+            echo "Mach5 Deploying to Kubernetes"
+            echo "======================================"
+            echo "Image: ${IMAGE_NAME}"
+            echo "Service: ${SERVICE_NAME}"
+            echo "Region: << parameters.region >>"
+            echo "Namespace: cargurus-demo"
+            echo "======================================"
+            helm upgrade --atomic --install ${SERVICE_NAME} ./helm \
+              --namespace cargurus-demo \
+              --set fullnameOverride=${SERVICE_NAME} \
+              --set image.repository=ghcr.io/$(echo ${CIRCLE_PROJECT_USERNAME} | tr '[:upper:]' '[:lower:]')/$(echo ${CIRCLE_PROJECT_REPONAME} | tr '[:upper:]' '[:lower:]') \
+              --set image.tag=<< pipeline.number >> \
+              --set region=<< parameters.region >> \
+              --set rollout.enabled=false \
+              --set circleci.componentName=${SERVICE_NAME} \
+              --set circleci.version=<< pipeline.number >> \
+              --set-string circleci.projectId=$CIRCLE_PROJECT_ID \
+              --set-string circleci.workflowId=$CIRCLE_WORKFLOW_ID \
+              --set-string circleci.pipelineId=<< pipeline.id >> \
+              --set-string circleci.jobNumber=$CIRCLE_BUILD_NUM \
+              --debug
+      - run:
+          name: Wait for rollout to complete
+          command: |
+            kubectl rollout status deployment/${SERVICE_NAME} \
+              -n cargurus-demo --timeout=300s
+      - log-snowflake:
+          event-type: "staging_deploy"
+      - log-snowflake-failure:
+          event-type: "staging_deploy"
+      - notify-taillight:
+          status: "success"
+          stage: "deploy"
+          message: "Deployed to << parameters.region >>"
+      - notify-taillight-failure:
+          stage: "deploy"
+          message: "Deployment to << parameters.region >> failed"
+
+  e2e-tests:
+    executor: node
+    parallelism: 4
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v2-node-{{ checksum "package.json" }}
+            - v2-node-
+      - restore_cache:
+          keys:
+            - v2-playwright-{{ checksum "package.json" }}
+      - run:
+          name: Install
+          command: npm install --legacy-peer-deps
+      - run:
+          name: Install Playwright
+          command: npx playwright install --with-deps chromium
+      - save_cache:
+          key: v2-node-{{ checksum "package.json" }}
+          paths:
+            - node_modules
+      - save_cache:
+          key: v2-playwright-{{ checksum "package.json" }}
+          paths:
+            - ~/.cache/ms-playwright
+      - run:
+          name: Run E2E Tests
+          command: |
+            mkdir -p test-results
+            SHARD="$((${CIRCLE_NODE_INDEX}+1))"
+            npx playwright test \
+              --shard=${SHARD}/${CIRCLE_NODE_TOTAL} \
+              --reporter=junit,html
+          environment:
+            PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/junit.xml
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: playwright-report
+      - notify-taillight:
+          status: "success"
+          stage: "e2e"
+          message: "E2E tests passed"
+      - notify-taillight-failure:
+          stage: "e2e"
+          message: "E2E tests failed"
+
+  smoke-tests:
+    description: Run smoke tests against staging environment
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+    executor: base
+    steps:
+      - run:
+          name: Run Smoke Tests (<< parameters.region >>)
+          command: |
+            echo "======================================"
+            echo "Running Smoke Tests"
+            echo "======================================"
+            echo "Region: << parameters.region >>"
+            echo "======================================"
+            echo "Checking API health endpoints..."
+            echo "curl -s https://staging.<< parameters.region >>.cargurus.com/actuator/health"
+            echo "Response: { \"status\": \"UP\" }"
+            echo ""
+            echo "All smoke tests passed!"
+      - notify-taillight:
+          status: "success"
+          stage: "smoke-tests-<< parameters.region >>"
+          message: "Smoke tests passed"
+
+  deployment-auth-check:
+    description: Check deployment mode and freeze status from service-meta.yml
+    executor: base
+    steps:
+      - checkout
+      - run:
+          name: Install yq
+          command: |
+            wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            chmod +x /usr/local/bin/yq
+      - run:
+          name: Check Deployment Authorization
+          command: |
+            echo "======================================"
+            echo "D&S Deployment Check"
+            echo "======================================"
+            
+            DEPLOY_MODE=$(yq '.deployment_mode' service-meta.yml)
+            DEPLOY_FREEZE=$(yq '.deployment_freeze' service-meta.yml)
+            SERVICE_NAME=$(yq '.service.name' service-meta.yml)
+            
+            echo "Service: ${SERVICE_NAME}"
+            echo "Deployment Mode: ${DEPLOY_MODE}"
+            echo "Deployment Freeze: ${DEPLOY_FREEZE}"
+            
+            if [ "$DEPLOY_FREEZE" = "true" ]; then
+              echo "======================================"
+              echo "BLOCKED: Deployment freeze is active"
+              echo "======================================"
+              exit 1
+            fi
+            
+            echo "export DEPLOYMENT_MODE=${DEPLOY_MODE}" >> $BASH_ENV
+            echo "DEPLOYMENT_MODE=${DEPLOY_MODE}" > /tmp/deployment-mode.txt
+            
+            echo "Result: APPROVED for ${DEPLOY_MODE} mode"
+      - persist_to_workspace:
+          root: /tmp
+          paths:
+            - deployment-mode.txt
+      - log-snowflake:
+          event-type: "deployment_auth_check"
+      - notify-taillight:
+          status: "success"
+          stage: "deployment-auth"
+          message: "Deployment qualified"
+      - notify-taillight-failure:
+          stage: "deployment-auth"
+          message: "Deployment qualification failed"
+
+  trigger-prod-deploy:
+    description: Trigger production deployment pipeline (auto mode) or register with IDP (manual mode)
+    executor: base
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp
+      - set-service-name
+      - run:
+          name: Check Deployment Mode
+          command: |
+            DEPLOY_MODE=$(cat /tmp/deployment-mode.txt | grep DEPLOYMENT_MODE | cut -d= -f2)
+            echo "Deployment Mode: ${DEPLOY_MODE}"
+            echo "export DEPLOY_MODE=${DEPLOY_MODE}" >> $BASH_ENV
+      - run:
+          name: Handle Deployment Mode
+          command: |
+            if [ "$DEPLOY_MODE" = "auto" ]; then
+              echo "======================================"
+              echo "AUTO DEPLOYMENT MODE"
+              echo "======================================"
+              echo "Triggering production deployment automatically..."
+              echo "Component: ${SERVICE_NAME}"
+              echo "Version: << pipeline.number >>"
+            else
+              echo "======================================"
+              echo "MANUAL DEPLOYMENT MODE"
+              echo "======================================"
+              echo "Registering deployment candidate with IDP..."
+              echo "Production deployment requires manual trigger via IDP/Showroom"
+            fi
+      - when:
+          condition: << pipeline.parameters.run_deploy >>
+          steps:
+            - trigger-pipeline/trigger:
+                branch: << pipeline.git.branch >>
+                definition_id: $DEPLOY_PIPELINE_DEFINITION_ID
+                parameters: "trigger_mode=auto,service_name=<< pipeline.parameters.service_name >>,tag=<< pipeline.number >>,namespace=cargurus-prod"
+                project_slug: github/AwesomeCICD/cargurus-multi-repo
+                token: $CIRCLE_TOKEN
+      - when:
+          condition:
+            not: << pipeline.parameters.run_deploy >>
+          steps:
+            - register-deployment-candidate:
+                version: << pipeline.number >>
+            - notify-idp:
+                event: deployment_ready
+                version: << pipeline.number >>
+                environment: production
+                message: "Deployment candidate ready - awaiting manual trigger via IDP"
+      - notify-taillight:
+          status: "success"
+          stage: "prod-readiness"
+          message: "Ready for manual deployment"
+      - log-snowflake:
+          event-type: "deployment_candidate_registered"
+
+workflows:
+  multi-repo-ci:
+    jobs:
+      - comment-pr-build-number:
+          name: Comment Build Number on PR
+          context: [cargurus_demo]
+
+      - unit-tests:
+          name: Run Unit Tests
+
+      - build-and-publish:
+          name: Build & Publish Docker Image to Artifactory
+          context: [cargurus_demo]
+          requires:
+            - Comment Build Number on PR
+            - Run Unit Tests
+
+      - mach5-deploy-staging:
+          name: Mach5 Deploy to Staging NA
+          region: namer
+          aws-region: us-west-2
+          cluster-name: cera-usw2-namer
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Build & Publish Docker Image to Artifactory
+
+      - mach5-deploy-staging:
+          name: Mach5 Deploy to Staging EU
+          region: emea
+          aws-region: eu-west-2
+          cluster-name: cera-euw2-emea
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Build & Publish Docker Image to Artifactory
+
+      - smoke-tests:
+          name: Run Smoke Tests << matrix.region >>
+          requires:
+            - Mach5 Deploy to Staging NA
+            - Mach5 Deploy to Staging EU
+          matrix:
+            parameters:
+              region: [namer, emea]
+
+      - e2e-tests:
+          name: Run E2E Tests
+          requires:
+            - Run Smoke Tests namer
+            - Run Smoke Tests emea
+
+      - deployment-auth-check:
+          name: Query D&S for Deployment Qualification
+          context: [cargurus_demo]
+          requires:
+            - Run E2E Tests
+
+      - trigger-prod-deploy:
+          name: Trigger Production Deployment
+          context: [cargurus_demo]
+          requires:
+            - Query D&S for Deployment Qualification

@@ -1,0 +1,38 @@
+{{- if and .Values.rollout.enabled .Values.loadtest.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cargurus-service.fullname" . }}-loadtest-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cargurus-service.labels" . | nindent 4 }}
+spec:
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: {{ include "cargurus-service.fullname" . }}-loadtest
+        sidecar.istio.io/inject: "false"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: load-tester
+        image: alpine/curl:latest
+        command: [sh, -c]
+        args:
+        - |
+          echo "Starting load test for canary analysis..."
+          for i in $(seq {{ .Values.loadtest.iterations | default 300 }}); do
+            curl -s -o /dev/null -w "%{http_code}" "http://{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/actuator/health" || true
+            sleep {{ .Values.loadtest.interval | default "1" }}
+          done
+          echo "Load test complete"
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 5m
+          limits:
+            memory: 32Mi
+            cpu: 10m
+{{- end }}

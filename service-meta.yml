@@ -1,0 +1,72 @@
+service:
+  name: demo-service
+  team: platform-engineering
+
+deployment_mode: manual
+deployment_freeze: false
+run_e2e: true
+
+regions:
+  - namer
+  - emea
+
+environments:
+  staging:
+    cluster: cera-usw2-namer
+    namespace: cargurus-demo
+  production:
+    cluster: cera-usw2-prod
+    namespace: cargurus-prod
+
+idp:
+  enabled: true
+  platform: showroom
+
+  catalog:
+    service_id: cargurus-multi-repo-demo
+    tier: medium
+    owner: platform-engineering
+    tags:
+      - multi-repo
+      - java
+      - kubernetes
+
+  showroom:
+    services:
+      - backend
+      - frontend
+      - cron-jobs
+      - shared-libraries
+      - sql-scripts
+    environments:
+      - Staging
+      - Production
+    regions:
+      NA: namer
+      EU: emea
+    namespaces:
+      - site-cars
+      - backend
+    defaults:
+      region: NA
+      namespace: site-cars
+
+  deployment:
+    require_approval: true
+    min_approvers: 1
+    approver_groups:
+      - platform-engineering
+      - release-managers
+    candidate_ttl: 24
+
+  notifications:
+    on_staging_success: true
+    on_deploy_complete: true
+    on_deploy_failure: true
+    notify_taillight: true
+    log_snowflake: true
+    slack_channel: "#deployments"
+
+  webhook:
+    enabled: true
+    validate_signature: true

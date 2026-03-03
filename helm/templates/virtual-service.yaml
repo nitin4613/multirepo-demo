@@ -1,0 +1,50 @@
+{{- if and .Values.rollout.enabled .Values.istio.enabled }}
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: {{ include "cargurus-service.fullname" . }}-vsvc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cargurus-service.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ .Values.istio.host | default (printf "%s.%s.cargurus.com" (include "cargurus-service.fullname" .) .Values.region) }}
+  gateways:
+    - {{ .Values.istio.gateway | default "istio-system/cargurus-gateway" }}
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: {{ include "cargurus-service.fullname" . }}-stable
+            port:
+              number: {{ .Values.service.port }}
+          weight: 100
+        - destination:
+            host: {{ include "cargurus-service.fullname" . }}-canary
+            port:
+              number: {{ .Values.service.port }}
+          weight: 0
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: {{ include "cargurus-service.fullname" . }}-destrule
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cargurus-service.labels" . | nindent 4 }}
+spec:
+  host: {{ include "cargurus-service.fullname" . }}-stable
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: {{ .Values.istio.maxConnections | default 100 }}
+      http:
+        h2UpgradePolicy: UPGRADE
+        http1MaxPendingRequests: {{ .Values.istio.maxPendingRequests | default 100 }}
+        http2MaxRequests: {{ .Values.istio.maxRequests | default 1000 }}
+    outlierDetection:
+      consecutive5xxErrors: {{ .Values.istio.consecutive5xxErrors | default 5 }}
+      interval: {{ .Values.istio.outlierInterval | default "30s" }}
+      baseEjectionTime: {{ .Values.istio.baseEjectionTime | default "30s" }}
+      maxEjectionPercent: {{ .Values.istio.maxEjectionPercent | default 10 }}
+{{- end }}

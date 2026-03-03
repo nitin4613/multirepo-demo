@@ -1,0 +1,156 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/cargurus/demo-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+region: namer
+
+circleci:
+  componentName: ""
+  version: ""
+  projectId: ""
+  pipelineId: ""
+  workflowId: ""
+  jobNumber: ""
+
+loadtest:
+  enabled: true
+  iterations: 300
+  interval: "1"
+
+rollout:
+  enabled: true
+  revisionHistoryLimit: 3
+  steps:
+    - weight: 30
+      pauseDuration: 20s
+    - weight: 50
+      pauseDuration: 20s
+    - weight: 70
+      pauseDuration: 20s
+    - weight: 90
+      pauseDuration: 20s
+    - weight: 100
+      pauseDuration: 20s
+  analysis:
+    interval: 10s
+    initialDelay: 40s
+    successThreshold: 0.90
+    failureLimit: 2
+    queryWindow: 25s
+    prometheusAddress: http://prometheus-server.istio-system:80
+    latencyEnabled: false
+    latencyThreshold: 0.5
+    errorRateEnabled: false
+    errorRateThreshold: 0.01
+
+istio:
+  enabled: true
+  host: ""
+  gateway: istio-ingress/namer-istio-gateway-subdomains
+  maxConnections: 100
+  maxPendingRequests: 100
+  maxRequests: 1000
+  consecutive5xxErrors: 5
+  outlierInterval: 30s
+  baseEjectionTime: 30s
+  maxEjectionPercent: 10
+
+imagePullSecrets:
+  - name: ghcr-credentials
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/actuator/prometheus"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+livenessProbe:
+  httpGet:
+    path: /actuator/health/liveness
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /actuator/health/readiness
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  failureThreshold: 3
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - cargurus-service
+          topologyKey: kubernetes.io/hostname
+
+env: []
+
+envFrom: []

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: cargurus-service
+description: A Helm chart for CarGurus microservices
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+maintainers:
+  - name: CarGurus Platform Team
+    email: platform@cargurus.com

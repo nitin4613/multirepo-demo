@@ -1,0 +1,79 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.0'
+    id 'io.spring.dependency-management' version '1.1.4'
+    id 'jacoco'
+}
+
+group = 'com.cargurus'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = '17'
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        url "https://artifactory.cargurus.com/artifactory/libs-release"
+        credentials {
+            username = System.getenv('ARTIFACTORY_USERNAME') ?: ''
+            password = System.getenv('ARTIFACTORY_PASSWORD') ?: ''
+        }
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.rest-assured:rest-assured:5.4.0'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // Exclude e2e tests - they require a running service
+    exclude '**/e2e/**'
+    finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+// E2E test configuration
+sourceSets {
+    e2eTest {
+        java.srcDir 'src/e2eTest/java'
+        resources.srcDir 'src/e2eTest/resources'
+        compileClasspath += sourceSets.main.output + sourceSets.test.output
+        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+    }
+}
+
+configurations {
+    e2eTestImplementation.extendsFrom testImplementation
+    e2eTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
+task e2eTest(type: Test) {
+    description = 'Runs E2E tests against staging environment'
+    group = 'verification'
+    // Run e2e tests from src/test/java/e2e/
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/e2e/**'
+    
+    systemProperty 'base.url', System.getProperty('base.url', 'http://localhost:8080')
+    
+    useJUnitPlatform()
+    
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
+}

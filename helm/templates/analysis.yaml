@@ -1,0 +1,72 @@
+{{- if .Values.rollout.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "cargurus-service.fullname" . }}-success-rate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cargurus-service.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: istio-success-rate
+      interval: {{ .Values.rollout.analysis.interval | default "10s" }}
+      initialDelay: {{ .Values.rollout.analysis.initialDelay | default "40s" }}
+      successCondition: "result[0] > {{ .Values.rollout.analysis.successThreshold | default 0.90 }}"
+      failureLimit: {{ .Values.rollout.analysis.failureLimit | default 2 }}
+      provider:
+        prometheus:
+          address: {{ .Values.rollout.analysis.prometheusAddress | default "http://prometheus-server.istio-system:80" }}
+          query: >+
+            (
+              sum(irate(istio_requests_total{
+                reporter="destination",
+                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
+                response_code!~"5.*"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+              )
+              /
+              sum(irate(istio_requests_total{
+                reporter="destination",
+                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+              )
+            ) or vector(1)
+
+    {{- if .Values.rollout.analysis.latencyEnabled }}
+    - name: latency-p99
+      interval: {{ .Values.rollout.analysis.interval | default "10s" }}
+      initialDelay: {{ .Values.rollout.analysis.initialDelay | default "40s" }}
+      successCondition: "result[0] < {{ .Values.rollout.analysis.latencyThreshold | default 0.5 }}"
+      failureLimit: {{ .Values.rollout.analysis.failureLimit | default 2 }}
+      provider:
+        prometheus:
+          address: {{ .Values.rollout.analysis.prometheusAddress | default "http://prometheus-server.istio-system:80" }}
+          query: >+
+            histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{
+              reporter="destination",
+              destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"
+            }[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])) by (le)) / 1000
+    {{- end }}
+
+    {{- if .Values.rollout.analysis.errorRateEnabled }}
+    - name: error-rate
+      interval: {{ .Values.rollout.analysis.interval | default "10s" }}
+      initialDelay: {{ .Values.rollout.analysis.initialDelay | default "40s" }}
+      successCondition: "result[0] < {{ .Values.rollout.analysis.errorRateThreshold | default 0.01 }}"
+      failureLimit: {{ .Values.rollout.analysis.failureLimit | default 2 }}
+      provider:
+        prometheus:
+          address: {{ .Values.rollout.analysis.prometheusAddress | default "http://prometheus-server.istio-system:80" }}
+          query: >+
+            (
+              sum(irate(istio_requests_total{
+                reporter="destination",
+                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
+                response_code=~"5.*"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+              )
+              /
+              sum(irate(istio_requests_total{
+                reporter="destination",
+                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+              )
+            ) or vector(0)
+    {{- end }}
+{{- end }}

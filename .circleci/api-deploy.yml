@@ -1,0 +1,855 @@
+version: 2.1
+
+orbs:
+  github-cli: circleci/github-cli@2.7.2
+  aws-cli: circleci/aws-cli@5.4.1
+
+parameters:
+  
+  service_name:
+    type: string
+    default: ""
+    description: "Name of the service to deploy (backend, frontend, cron-jobs, shared-libraries, sql-scripts)"
+  
+  environment:
+    type: string
+    default: "Production"
+    description: "Target environment (Staging or Production)"
+  
+  region:
+    type: string
+    default: "NA"
+    description: "Target region (NA or EU) - maps to namer/emea internally"
+  
+  namespace:
+    type: string
+    default: "cargurus-prod"
+    description: "Kubernetes namespace for production deployments"
+  
+  tag:
+    type: string
+    default: ""
+    description: "Docker image tag to deploy (required)"
+  
+  trigger_mode:
+    type: enum
+    enum: ["showroom", "manual", "webhook", "auto"]
+    default: "showroom"
+    description: "Source of deployment trigger (showroom = manual deploy via Showroom)"
+  
+  showroom_request_id:
+    type: string
+    default: ""
+    description: "Showroom request tracking ID for callback correlation"
+  
+  showroom_callback_url:
+    type: string
+    default: ""
+    description: "URL to send deployment status updates to Showroom"
+  
+  requested_by:
+    type: string
+    default: ""
+    description: "User who initiated the manual deployment"
+
+executors:
+  deploy:
+    docker:
+      - image: cimg/deploy:2025.01.1-node
+    resource_class: small
+
+commands:
+  set-service-name:
+    description: Set SERVICE_NAME from parameter or derive from repo name
+    steps:
+      - run:
+          name: Set service name
+          command: |
+            if [ -n "<< pipeline.parameters.service_name >>" ]; then
+              SERVICE_NAME="<< pipeline.parameters.service_name >>"
+            else
+              SERVICE_NAME=$(echo "${CIRCLE_PROJECT_REPONAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            fi
+            echo "export SERVICE_NAME=${SERVICE_NAME}" >> $BASH_ENV
+            echo "Service name: ${SERVICE_NAME}"
+
+  set-region-config:
+    parameters:
+      region:
+        type: string
+    steps:
+      - run:
+          name: Set region config
+          command: |
+            if [ "<< parameters.region >>" = "emea" ]; then
+              echo "export CLUSTER_NAME=cera-euw2-emea" >> $BASH_ENV
+              echo "export AWS_REGION=eu-west-2" >> $BASH_ENV
+              echo "export ENVIRONMENT_NAME=Car-Gurus-Multi-Repo-Production-EU" >> $BASH_ENV
+            else
+              echo "export CLUSTER_NAME=cera-usw2-namer" >> $BASH_ENV
+              echo "export AWS_REGION=us-west-2" >> $BASH_ENV
+              echo "export ENVIRONMENT_NAME=Car-Gurus-Multi-Repo-Production-NA" >> $BASH_ENV
+            fi
+            source $BASH_ENV
+
+  install-argo-rollouts-plugin:
+    description: Install kubectl argo rollouts plugin
+    steps:
+      - run:
+          name: Install kubectl-argo-rollouts plugin
+          command: |
+            curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+            chmod +x kubectl-argo-rollouts-linux-amd64
+            sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+  setup-eks:
+    steps:
+      - aws-cli/setup:
+          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          region: ${AWS_REGION}
+          profile_name: circleci-oidc
+          role_session_name: circleci-deploy-<< pipeline.number >>
+          session_duration: "1800"
+      - run:
+          name: Configure kubectl
+          command: aws eks update-kubeconfig --name ${CLUSTER_NAME} --region ${AWS_REGION} --profile circleci-oidc
+
+  notify-taillight:
+    parameters:
+      stage:
+        type: string
+      status:
+        type: string
+    steps:
+      - run:
+          name: Notify Taillight
+          command: |
+            echo "Taillight: << parameters.stage >> - << parameters.status >>"
+
+  log-snowflake:
+    parameters:
+      event:
+        type: string
+    steps:
+      - run:
+          name: Log to Snowflake
+          command: |
+            echo "Snowflake: << parameters.event >> | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  notify-showroom:
+    parameters:
+      status:
+        type: string
+      message:
+        type: string
+    steps:
+      - run:
+          name: Notify Showroom
+          command: |
+            echo "Showroom: << parameters.status >> - << parameters.message >>"
+
+  notify-showroom-callback:
+    description: Send deployment status callback to Showroom
+    parameters:
+      event:
+        type: enum
+        enum: ["manual_deploy_approved", "manual_deploy_blocked", "deployment_started", "deployment_progress", "deployment_success", "deployment_failure"]
+        description: Deployment event type
+      status:
+        type: enum
+        enum: ["approved", "blocked", "in_progress", "success", "failed"]
+        description: Current deployment status
+      message:
+        type: string
+        default: ""
+        description: Status message
+      region:
+        type: string
+        default: "all"
+        description: Region this status applies to
+    steps:
+      - run:
+          name: Notify Showroom - << parameters.event >>
+          command: |
+            echo "======================================"
+            echo "Notify Showroom: << parameters.event >>"
+            echo "======================================"
+            echo "Service:      ${SERVICE_NAME}"
+            echo "Version:      << pipeline.parameters.tag >>"
+            echo "Status:       << parameters.status >>"
+            echo "Region:       << parameters.region >>"
+            echo "Trigger Mode: << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:   << pipeline.parameters.showroom_request_id >>"
+            echo "Requested By: << pipeline.parameters.requested_by >>"
+            echo "Message:      << parameters.message >>"
+            echo "======================================"
+            
+            CALLBACK_PAYLOAD=$(cat \<<EOF
+            {
+              "event": "<< parameters.event >>",
+              "request_id": "<< pipeline.parameters.showroom_request_id >>",
+              "service": {
+                "name": "${SERVICE_NAME}",
+                "repository": "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+              },
+              "deployment": {
+                "version": "<< pipeline.parameters.tag >>",
+                "namespace": "<< pipeline.parameters.namespace >>",
+                "environment": "<< pipeline.parameters.environment >>",
+                "status": "<< parameters.status >>",
+                "region": "<< parameters.region >>",
+                "pipeline_number": "<< pipeline.number >>",
+                "workflow_id": "${CIRCLE_WORKFLOW_ID}"
+              },
+              "triggered_by": {
+                "mode": "<< pipeline.parameters.trigger_mode >>",
+                "user": "<< pipeline.parameters.requested_by >>"
+              },
+              "message": "<< parameters.message >>",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "links": {
+                "pipeline": "https://app.circleci.com/pipelines/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/<< pipeline.number >>",
+                "workflow": "https://app.circleci.com/pipelines/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/<< pipeline.number >>/workflows/${CIRCLE_WORKFLOW_ID}"
+              }
+            }
+            EOF
+            )
+            
+            echo ""
+            echo "Showroom Callback Payload:"
+            echo "${CALLBACK_PAYLOAD}" | jq '.' 2>/dev/null || echo "${CALLBACK_PAYLOAD}"
+            
+            CALLBACK_URL="<< pipeline.parameters.showroom_callback_url >>"
+            if [ -n "${CALLBACK_URL}" ]; then
+              echo ""
+              echo "Sending callback to Showroom: ${CALLBACK_URL}"
+              curl -s -X POST "${CALLBACK_URL}" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: << pipeline.parameters.showroom_request_id >>" \
+                -H "Authorization: Bearer ${SHOWROOM_API_TOKEN:-}" \
+                -d "${CALLBACK_PAYLOAD}" && echo "Callback sent successfully" || echo "Callback failed (non-critical)"
+            elif [ -n "${SHOWROOM_WEBHOOK_URL:-}" ]; then
+              echo ""
+              echo "Sending callback to SHOWROOM_WEBHOOK_URL"
+              curl -s -X POST "${SHOWROOM_WEBHOOK_URL}/callbacks" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: << pipeline.parameters.showroom_request_id >>" \
+                -H "Authorization: Bearer ${SHOWROOM_API_TOKEN:-}" \
+                -d "${CALLBACK_PAYLOAD}" && echo "Callback sent successfully" || echo "Callback failed (non-critical)"
+            else
+              echo "No Showroom callback URL configured - status logged only"
+            fi
+
+  notify-showroom-failure:
+    description: Send failure callback to Showroom and Taillight (on job failure)
+    parameters:
+      stage:
+        type: string
+        description: Pipeline stage that failed
+      region:
+        type: string
+        default: "all"
+    steps:
+      - run:
+          name: Notify Showroom, Taillight - Failure
+          when: on_fail
+          command: |
+            echo "======================================"
+            echo "Notify Showroom, Taillight: FAILURE"
+            echo "======================================"
+            echo "Stage:   << parameters.stage >>"
+            echo "Region:  << parameters.region >>"
+            echo "Service: ${SERVICE_NAME:-unknown}"
+            echo "Version: << pipeline.parameters.tag >>"
+            echo "======================================"
+            
+            FAILURE_PAYLOAD=$(cat \<<EOF
+            {
+              "event": "deployment_failure",
+              "request_id": "<< pipeline.parameters.showroom_request_id >>",
+              "service_name": "${SERVICE_NAME:-unknown}",
+              "version": "<< pipeline.parameters.tag >>",
+              "environment": "<< pipeline.parameters.environment >>",
+              "status": "failed",
+              "failed_stage": "<< parameters.stage >>",
+              "region": "<< parameters.region >>",
+              "pipeline_number": "<< pipeline.number >>",
+              "workflow_id": "${CIRCLE_WORKFLOW_ID}",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "rollback_recommended": true
+            }
+            EOF
+            )
+            
+            CALLBACK_URL="<< pipeline.parameters.showroom_callback_url >>"
+            if [ -n "${CALLBACK_URL}" ]; then
+              curl -s -X POST "${CALLBACK_URL}" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: << pipeline.parameters.showroom_request_id >>" \
+                -d "${FAILURE_PAYLOAD}" || true
+            elif [ -n "${SHOWROOM_WEBHOOK_URL:-}" ]; then
+              curl -s -X POST "${SHOWROOM_WEBHOOK_URL}/callbacks" \
+                -H "Content-Type: application/json" \
+                -d "${FAILURE_PAYLOAD}" || true
+            fi
+            
+            echo "Taillight: deployment_failure - << parameters.stage >> failed"
+
+jobs:
+  check-eligibility:
+    description: Query DAS for Manual Deployment Qualification (per flowchart)
+    executor: deploy
+    steps:
+      - set-service-name
+      - run:
+          name: Validate Showroom manual deploy parameters
+          command: |
+            echo "======================================"
+            echo "User Initiates Manual Deploy via Showroom"
+            echo "======================================"
+            echo "Service Name:  << pipeline.parameters.service_name >>"
+            echo "Environment:   << pipeline.parameters.environment >>"
+            echo "Region:        << pipeline.parameters.region >>"
+            echo "Namespace:     << pipeline.parameters.namespace >>"
+            echo "Trigger Mode:  << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:    << pipeline.parameters.showroom_request_id >>"
+            echo "Requested By:  << pipeline.parameters.requested_by >>"
+            echo "======================================"
+            
+            if [ -z "<< pipeline.parameters.tag >>" ]; then
+              echo ""
+              echo "ERROR: 'tag' parameter is REQUIRED"
+              echo ""
+              echo "For manual deployments via Showroom, the tag must be provided."
+              echo ""
+              exit 1
+            fi
+            echo "Tag validated: << pipeline.parameters.tag >>"
+      - run:
+          name: Query DAS for Manual Deployment Qualification
+          command: |
+            echo "======================================"
+            echo "Query DAS for Manual Deployment Qualification"
+            echo "======================================"
+            echo "Service:     ${SERVICE_NAME}"
+            echo "Version:     << pipeline.parameters.tag >>"
+            echo "Environment: << pipeline.parameters.environment >>"
+            echo "======================================"
+            
+            echo ""
+            echo "Checking DAS API..."
+            echo "  Manual Mode:     ENABLED"
+            echo "  Deploy Freeze:   INACTIVE"
+            
+            MANUAL_MODE_ENABLED=true
+            DEPLOY_FREEZE=false
+            
+            if [ "$DEPLOY_FREEZE" = "true" ]; then
+              echo ""
+              echo "======================================"
+              echo "BLOCKED: Deploy Freeze is ACTIVE"
+              echo "======================================"
+              echo "Manual deployment blocked due to deployment freeze."
+              exit 1
+            fi
+            
+            if [ "$MANUAL_MODE_ENABLED" != "true" ]; then
+              echo ""
+              echo "======================================"
+              echo "BLOCKED: Manual Mode is DISABLED"
+              echo "======================================"
+              echo "Manual deployment blocked - service not configured for manual deploys."
+              exit 1
+            fi
+            
+            echo ""
+            echo "======================================"
+            echo "APPROVED: Manual Deploy Qualified"
+            echo "======================================"
+      - log-snowflake:
+          event: manual_deploy_qualification
+      - notify-showroom-callback:
+          event: manual_deploy_approved
+          status: approved
+          message: "Manual deployment qualified - proceeding to production"
+      - notify-taillight:
+          stage: das-qualification
+          status: approved
+      - notify-showroom-failure:
+          stage: das-qualification
+
+  promote-image:
+    executor: deploy
+    steps:
+      - set-service-name
+      - run:
+          name: Promote to production registry
+          command: |
+            echo "Promoting ${SERVICE_NAME}:<< pipeline.parameters.tag >>"
+            echo "Image ready for deployment"
+      - log-snowflake:
+          event: image_promoted
+      - notify-showroom:
+          status: promoted
+          message: Image promoted
+
+  deploy-canary:
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+      environment-name:
+        type: string
+        description: Environment name for release tracking
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - set-region-config:
+          region: << parameters.region >>
+      - notify-showroom-callback:
+          event: deployment_progress
+          status: in_progress
+          region: << parameters.region >>
+          message: "Deploying canary to << parameters.region >>"
+      - notify-showroom:
+          status: starting
+          message: Canary deploy starting [<< parameters.region >>]
+      - setup-eks
+      - run:
+          name: Deploy canary with Helm (<< parameters.region >>)
+          command: |
+            echo "======================================"
+            echo "Manual Deploy - Canary Deployment"
+            echo "======================================"
+            echo "Region:       << parameters.region >>"
+            echo "Environment:  << pipeline.parameters.environment >>"
+            echo "Version:      << pipeline.parameters.tag >>"
+            echo "Trigger Mode: << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:   << pipeline.parameters.showroom_request_id >>"
+            echo "======================================"
+            
+            helm upgrade --atomic --install ${SERVICE_NAME} ./helm \
+              --namespace << pipeline.parameters.namespace >> \
+              --set fullnameOverride=${SERVICE_NAME} \
+              --set image.tag=<< pipeline.parameters.tag >> \
+              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set rollout.enabled=true \
+              --set region=<< parameters.region >> \
+              --set istio.gateway=istio-ingress/<< parameters.region >>-istio-gateway-subdomains \
+              --set circleci.componentName=${SERVICE_NAME} \
+              --set circleci.version=<< pipeline.parameters.tag >> \
+              --set circleci.projectId=${CIRCLE_PROJECT_ID} \
+              --set circleci.pipelineId=${CIRCLE_PIPELINE_ID} \
+              --set circleci.workflowId=${CIRCLE_WORKFLOW_ID} \
+              --set circleci.jobNumber=${CIRCLE_BUILD_NUM}
+      - run:
+          name: Plan release for monitoring
+          command: |
+            circleci run release plan << parameters.environment-name >> \
+              --environment-name=<< parameters.environment-name >> \
+              --component-name=${SERVICE_NAME} \
+              --target-version=<< pipeline.parameters.tag >> \
+              --namespace=<< pipeline.parameters.namespace >> \
+              --release-strategy=progressive
+      - log-snowflake:
+          event: manual_deploy_canary_<< parameters.region >>
+      - notify-showroom:
+          status: deployed
+          message: Canary deployed [<< parameters.region >>]
+      - notify-taillight:
+          stage: canary-<< parameters.region >>
+          status: success
+      - notify-showroom-failure:
+          stage: canary-deploy
+          region: << parameters.region >>
+
+  monitor-namer:
+    type: release
+    plan_name: Car-Gurus-Multi-Repo-Production-NA
+
+  monitor-emea:
+    type: release
+    plan_name: Car-Gurus-Multi-Repo-Production-EU
+
+  wait-analysis:
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - set-region-config:
+          region: << parameters.region >>
+      - notify-showroom:
+          status: analyzing
+          message: Waiting for analysis [<< parameters.region >>]
+      - setup-eks
+      - install-argo-rollouts-plugin
+      - run:
+          name: Wait for Argo analysis
+          command: |
+            kubectl-argo-rollouts status ${SERVICE_NAME} \
+              -n << pipeline.parameters.namespace >> --watch --timeout=600s
+      - run:
+          name: Check analysis result
+          command: |
+            PHASE=$(kubectl get rollout ${SERVICE_NAME} \
+              -n << pipeline.parameters.namespace >> -o jsonpath='{.status.phase}')
+            echo "Phase: $PHASE"
+            [ "$PHASE" != "Degraded" ] || exit 1
+      - log-snowflake:
+          event: analysis_passed_<< parameters.region >>
+      - notify-taillight:
+          stage: analysis-<< parameters.region >>
+          status: success
+      - run:
+          name: Handle auto-rollback
+          when: on_fail
+          command: |
+            echo "Analysis failed - Argo auto-rollback triggered"
+            kubectl-argo-rollouts status ${SERVICE_NAME} \
+              -n << pipeline.parameters.namespace >> --timeout=300s || true
+
+  full-rollout:
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - set-region-config:
+          region: << parameters.region >>
+      - setup-eks
+      - install-argo-rollouts-plugin
+      - run:
+          name: Promote to full rollout (<< parameters.region >>)
+          command: |
+            echo "======================================"
+            echo "Full Rollout - << parameters.region >>"
+            echo "======================================"
+            echo "Environment:  << pipeline.parameters.environment >>"
+            echo "Trigger Mode: << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:   << pipeline.parameters.showroom_request_id >>"
+            echo "======================================"
+            
+            kubectl-argo-rollouts promote ${SERVICE_NAME} \
+              -n << pipeline.parameters.namespace >> --full
+            kubectl-argo-rollouts status ${SERVICE_NAME} \
+              -n << pipeline.parameters.namespace >> --timeout=600s
+      - log-snowflake:
+          event: manual_deploy_rollout_success_<< parameters.region >>
+      - notify-showroom:
+          status: success
+          message: Full rollout [<< parameters.region >>]
+      - notify-taillight:
+          stage: rollout-<< parameters.region >>
+          status: success
+      - notify-showroom-callback:
+          event: deployment_progress
+          status: success
+          region: << parameters.region >>
+          message: "Full rollout completed for << parameters.region >>"
+      - notify-showroom-failure:
+          stage: full-rollout
+          region: << parameters.region >>
+
+  create-release:
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - github-cli/setup:
+          token: GH_TOKEN
+      - run:
+          name: Create GitHub release
+          command: |
+            gh release create "v<< pipeline.parameters.tag >>" \
+              --title "${SERVICE_NAME} v<< pipeline.parameters.tag >>" \
+              --notes "Production deployment via Showroom manual deploy (trigger_mode: << pipeline.parameters.trigger_mode >>)" \
+              --generate-notes || echo "Release exists"
+      - log-snowflake:
+          event: manual_deploy_release_created
+      - notify-taillight:
+          stage: release
+          status: success
+      - notify-showroom-callback:
+          event: deployment_success
+          status: success
+          region: all
+          message: "Manual deployment completed successfully to all regions"
+      - run:
+          name: Manual Deploy Summary
+          command: |
+            echo "======================================"
+            echo "MANUAL DEPLOY COMPLETE"
+            echo "======================================"
+            echo ""
+            echo "Service:      ${SERVICE_NAME}"
+            echo "Environment:  << pipeline.parameters.environment >>"
+            echo "Version:      << pipeline.parameters.tag >>"
+            echo "Namespace:    << pipeline.parameters.namespace >>"
+            echo "Trigger Mode: << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:   << pipeline.parameters.showroom_request_id >>"
+            echo "Requested By: << pipeline.parameters.requested_by >>"
+            echo ""
+            echo "Deployment Status: SUCCESS"
+            echo "Regions Deployed:  namer, emea"
+            echo ""
+            echo "GitHub Release: v<< pipeline.parameters.tag >>"
+            echo "======================================"
+
+  deploy-webhook:
+    description: Handle Showroom webhook-triggered manual deployments
+    executor: deploy
+    environment:
+      WEBHOOK_BODY: << pipeline.trigger_parameters.webhook.body >>
+    steps:
+      - checkout
+      - run:
+          name: Parse Showroom manual deploy webhook payload
+          command: |
+            echo "======================================"
+            echo "User Initiates Manual Deploy via Showroom (Webhook)"
+            echo "======================================"
+            echo "Raw Payload:"
+            echo "$WEBHOOK_BODY" | jq '.' 2>/dev/null || echo "$WEBHOOK_BODY"
+            echo "======================================"
+            
+            export SERVICE_NAME=$(echo "$WEBHOOK_BODY" | jq -r '.service_name // ""')
+            export ENVIRONMENT=$(echo "$WEBHOOK_BODY" | jq -r '.environment // "Production"')
+            export SHOWROOM_REGION=$(echo "$WEBHOOK_BODY" | jq -r '.region // "NA"')
+            export NAMESPACE=$(echo "$WEBHOOK_BODY" | jq -r '.namespace // "cargurus-prod"')
+            export TAG=$(echo "$WEBHOOK_BODY" | jq -r '.tag // ""')
+            
+            export SHOWROOM_REQUEST_ID=$(echo "$WEBHOOK_BODY" | jq -r '.request_id // ""')
+            export REQUESTED_BY=$(echo "$WEBHOOK_BODY" | jq -r '.requested_by // "showroom-webhook"')
+            export SHOWROOM_CALLBACK_URL=$(echo "$WEBHOOK_BODY" | jq -r '.callback_url // ""')
+            
+            if [ "$SHOWROOM_REGION" = "NA" ]; then
+              INTERNAL_REGION="namer"
+              CLUSTER="cera-usw2-namer"
+              AWS_REGION="us-west-2"
+            elif [ "$SHOWROOM_REGION" = "EU" ]; then
+              INTERNAL_REGION="emea"
+              CLUSTER="cera-euw2-emea"
+              AWS_REGION="eu-west-2"
+            else
+              INTERNAL_REGION="$SHOWROOM_REGION"
+              [ "$SHOWROOM_REGION" = "emea" ] && CLUSTER="cera-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="cera-usw2-namer" AWS_REGION="us-west-2"
+            fi
+            
+            if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+              echo "ERROR: 'tag' is required in webhook payload"
+              exit 1
+            fi
+            
+            if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "null" ]; then
+              SERVICE_NAME=$(echo "${CIRCLE_PROJECT_REPONAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            fi
+            
+            echo ""
+            echo "Parsed Showroom Configuration:"
+            echo "  Service:      $SERVICE_NAME"
+            echo "  Environment:  $ENVIRONMENT"
+            echo "  Region:       $SHOWROOM_REGION -> $INTERNAL_REGION"
+            echo "  Namespace:    $NAMESPACE"
+            echo "  Tag:          $TAG"
+            echo "  Cluster:      $CLUSTER"
+            echo "  Request ID:   $SHOWROOM_REQUEST_ID"
+            echo "  Requested By: $REQUESTED_BY"
+            
+            echo "export SERVICE_NAME=$SERVICE_NAME" >> $BASH_ENV
+            echo "export ENVIRONMENT=$ENVIRONMENT" >> $BASH_ENV
+            echo "export SHOWROOM_REGION=$SHOWROOM_REGION" >> $BASH_ENV
+            echo "export INTERNAL_REGION=$INTERNAL_REGION" >> $BASH_ENV
+            echo "export NAMESPACE=$NAMESPACE" >> $BASH_ENV
+            echo "export TAG=$TAG" >> $BASH_ENV
+            echo "export CLUSTER_NAME=$CLUSTER" >> $BASH_ENV
+            echo "export AWS_REGION=$AWS_REGION" >> $BASH_ENV
+            echo "export SHOWROOM_REQUEST_ID=$SHOWROOM_REQUEST_ID" >> $BASH_ENV
+            echo "export SHOWROOM_CALLBACK_URL=$SHOWROOM_CALLBACK_URL" >> $BASH_ENV
+            echo "export REQUESTED_BY=$REQUESTED_BY" >> $BASH_ENV
+      - run:
+          name: Notify Showroom - deployment started
+          command: |
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"deployment_started\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"version\":\"$TAG\",\"status\":\"in_progress\"}" || true
+            fi
+      - setup-eks
+      - install-argo-rollouts-plugin
+      - run:
+          name: Deploy canary via Helm
+          command: |
+            echo "======================================"
+            echo "Showroom Manual Deploy - Canary"
+            echo "======================================"
+            echo "Service:     $SERVICE_NAME"
+            echo "Environment: $ENVIRONMENT"
+            echo "Region:      $SHOWROOM_REGION ($INTERNAL_REGION)"
+            echo "Namespace:   $NAMESPACE"
+            echo "Version:     $TAG"
+            echo "======================================"
+            
+            helm upgrade --atomic --install $SERVICE_NAME ./helm \
+              --namespace $NAMESPACE \
+              --set fullnameOverride=$SERVICE_NAME \
+              --set image.tag=$TAG \
+              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set rollout.enabled=true \
+              --set region=$INTERNAL_REGION \
+              --set istio.gateway=istio-ingress/${INTERNAL_REGION}-istio-gateway-subdomains \
+              --set circleci.componentName=$SERVICE_NAME \
+              --set circleci.version=$TAG \
+              --set circleci.projectId=${CIRCLE_PROJECT_ID} \
+              --set circleci.pipelineId=${CIRCLE_PIPELINE_ID} \
+              --set circleci.workflowId=${CIRCLE_WORKFLOW_ID} \
+              --set circleci.jobNumber=${CIRCLE_BUILD_NUM}
+      - run:
+          name: Register release plan for monitoring
+          command: |
+            if [ "$INTERNAL_REGION" = "emea" ]; then
+              ENVIRONMENT_NAME="Car-Gurus-Multi-Repo-Production-EU"
+            else
+              ENVIRONMENT_NAME="Car-Gurus-Multi-Repo-Production-NA"
+            fi
+            
+            echo "Registering release plan: $ENVIRONMENT_NAME"
+            circleci run release plan "$ENVIRONMENT_NAME" \
+              --environment-name="$ENVIRONMENT_NAME" \
+              --component-name=$SERVICE_NAME \
+              --target-version=$TAG \
+              --namespace=$NAMESPACE \
+              --release-strategy=progressive
+      - run:
+          name: Wait for Argo Rollouts analysis
+          command: kubectl-argo-rollouts status $SERVICE_NAME -n $NAMESPACE --watch --timeout=300s
+      - run:
+          name: Promote to full rollout
+          command: kubectl-argo-rollouts promote $SERVICE_NAME -n $NAMESPACE --full
+      - run:
+          name: Log to Snowflake, Notify Showroom - Success
+          command: |
+            echo "Snowflake: manual_deploy_webhook_success | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"deployment_success\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"version\":\"$TAG\",\"status\":\"success\"}" || true
+            fi
+            
+            echo "======================================"
+            echo "SHOWROOM MANUAL DEPLOY COMPLETE"
+            echo "======================================"
+            echo "Service:     $SERVICE_NAME"
+            echo "Environment: $ENVIRONMENT"
+            echo "Region:      $SHOWROOM_REGION"
+            echo "Version:     $TAG"
+            echo "Status:      SUCCESS"
+            echo "======================================"
+      - run:
+          name: Notify Showroom, Taillight - Failure
+          when: on_fail
+          command: |
+            echo "Taillight: deployment_failure"
+            
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"deployment_failure\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"version\":\"$TAG\",\"status\":\"failed\"}" || true
+            fi
+
+workflows:
+  api-deploy:
+    when:
+      equal: [api, << pipeline.trigger_source >>]
+    jobs:
+      - check-eligibility:
+          name: Query D&S for Deployment Qualification
+          context: [cargurus_demo]
+
+      - promote-image:
+          name: Promote Docker Image to Production
+          context: [cargurus_demo]
+          requires:
+            - Query D&S for Deployment Qualification
+
+      - deploy-canary:
+          name: Mach5 Deploy to Production Canary NA
+          region: namer
+          environment-name: Car-Gurus-Multi-Repo-Production-NA
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Promote Docker Image to Production
+
+      - deploy-canary:
+          name: Mach5 Deploy to Production Canary EU
+          region: emea
+          environment-name: Car-Gurus-Multi-Repo-Production-EU
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Promote Docker Image to Production
+
+      - monitor-namer:
+          name: Monitor Release NA
+          requires:
+            - Mach5 Deploy to Production Canary NA
+
+      - monitor-emea:
+          name: Monitor Release EU
+          requires:
+            - Mach5 Deploy to Production Canary EU
+
+      - wait-analysis:
+          name: Wait for Argo Rollouts Canary Analysis NA
+          region: namer
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Monitor Release NA
+
+      - wait-analysis:
+          name: Wait for Argo Rollouts Canary Analysis EU
+          region: emea
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Monitor Release EU
+
+      - full-rollout:
+          name: Wait for Full Rollout by Argo NA
+          region: namer
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Wait for Argo Rollouts Canary Analysis NA
+
+      - full-rollout:
+          name: Wait for Full Rollout by Argo EU
+          region: emea
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Wait for Argo Rollouts Canary Analysis EU
+
+      - create-release:
+          name: Create GitHub Release
+          context: [cargurus_demo]
+          requires:
+            - Wait for Full Rollout by Argo NA
+            - Wait for Full Rollout by Argo EU
+
+  webhook-deploy:
+    when:
+      and:
+        - equal: [webhook, << pipeline.trigger_source >>]
+        - << pipeline.trigger_parameters.webhook.body >>
+    jobs:
+      - deploy-webhook:
+          name: Port IDP Webhook Deploy
+          context: [cargurus_demo, cargurus-oidc]

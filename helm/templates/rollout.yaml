@@ -1,0 +1,115 @@
+{{- if .Values.rollout.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "cargurus-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cargurus-service.labels" . | nindent 4 }}
+    circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
+    circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
+  annotations:
+    circleci.com/project-id: {{ .Values.circleci.projectId | default "unknown" | quote }}
+    circleci.com/helm-revision-number: {{ .Release.Revision | quote }}
+    circleci.com/operation-timeout: "10m"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels:
+      {{- include "cargurus-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if .Values.istio.enabled }}
+        sidecar.istio.io/inject: "true"
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- if .Values.istio.enabled }}
+        sidecar.istio.io/inject: "true"
+        {{- end }}
+        {{- include "cargurus-service.selectorLabels" . | nindent 8 }}
+        circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
+        circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "cargurus-service.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  strategy:
+    canary:
+      analysis:
+        templates:
+          - templateName: {{ include "cargurus-service.fullname" . }}-success-rate
+      canaryService: {{ include "cargurus-service.fullname" . }}-canary
+      stableService: {{ include "cargurus-service.fullname" . }}-stable
+      {{- if .Values.istio.enabled }}
+      trafficRouting:
+        istio:
+          virtualService:
+            name: {{ include "cargurus-service.fullname" . }}-vsvc
+            routes:
+              - primary
+      {{- end }}
+      steps:
+        {{- range .Values.rollout.steps }}
+        - setWeight: {{ .weight }}
+        - pause: { duration: {{ .pauseDuration }} }
+        {{- end }}
+{{- end }}

@@ -1,0 +1,536 @@
+version: 2.1
+
+orbs:
+  aws-cli: circleci/aws-cli@5.4.1
+
+parameters:
+  service_name:
+    type: string
+    default: ""
+    description: "Name of the service to rollback (backend, frontend, cron-jobs, shared-libraries, sql-scripts)"
+  
+  environment:
+    type: string
+    default: "Production"
+    description: "Target environment (Staging or Production)"
+  
+  region:
+    type: string
+    default: "NA"
+    description: "Target region (NA or EU) - maps to namer/emea internally"
+  
+  namespace:
+    type: string
+    default: "site-cars"
+    description: "Kubernetes namespace (site-cars, backend)"
+  
+  tag:
+    type: string
+    default: ""
+    description: "Docker image tag to rollback TO (required)"
+  
+  current_version:
+    type: string
+    default: ""
+    description: "Current deployed version being rolled back FROM"
+  
+  trigger_mode:
+    type: enum
+    enum: ["showroom", "manual", "webhook", "auto"]
+    default: "showroom"
+    description: "Source of rollback trigger (showroom = manual rollback via Showroom)"
+  
+  showroom_request_id:
+    type: string
+    default: ""
+    description: "Showroom request tracking ID for callback correlation"
+  
+  showroom_callback_url:
+    type: string
+    default: ""
+    description: "URL to send rollback status updates to Showroom"
+  
+  requested_by:
+    type: string
+    default: ""
+    description: "User who initiated the manual rollback"
+  
+  rollback_reason:
+    type: string
+    default: ""
+    description: "Reason for initiating rollback"
+
+executors:
+  deploy:
+    docker:
+      - image: cimg/deploy:2025.01.1-node
+    resource_class: small
+
+commands:
+  install-argo-rollouts-plugin:
+    description: Install kubectl argo rollouts plugin
+    steps:
+      - run:
+          name: Install kubectl-argo-rollouts plugin
+          command: |
+            curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+            chmod +x kubectl-argo-rollouts-linux-amd64
+            sudo mv kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+
+  set-service-name:
+    description: Set SERVICE_NAME from parameter or derive from repo name
+    steps:
+      - run:
+          name: Set service name
+          command: |
+            if [ -n "<< pipeline.parameters.service_name >>" ]; then
+              SERVICE_NAME="<< pipeline.parameters.service_name >>"
+            else
+              SERVICE_NAME=$(echo "${CIRCLE_PROJECT_REPONAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            fi
+            echo "export SERVICE_NAME=${SERVICE_NAME}" >> $BASH_ENV
+            echo "Service name: ${SERVICE_NAME}"
+
+  notify-showroom-rollback:
+    description: Send rollback status callback to Showroom
+    parameters:
+      event:
+        type: enum
+        enum: ["rollback_started", "rollback_progress", "rollback_success", "rollback_failure"]
+        description: Rollback event type
+      status:
+        type: enum
+        enum: ["pending", "in_progress", "success", "failed"]
+        description: Current rollback status
+      message:
+        type: string
+        default: ""
+        description: Status message
+      region:
+        type: string
+        default: "all"
+        description: Region this status applies to
+    steps:
+      - run:
+          name: Notify Showroom - << parameters.event >>
+          command: |
+            echo "======================================"
+            echo "Notify Showroom: << parameters.event >>"
+            echo "======================================"
+            echo "Service:         ${SERVICE_NAME}"
+            echo "Rolling back to: << pipeline.parameters.tag >>"
+            echo "From version:    << pipeline.parameters.current_version >>"
+            echo "Status:          << parameters.status >>"
+            echo "Region:          << parameters.region >>"
+            echo "Trigger Mode:    << pipeline.parameters.trigger_mode >>"
+            echo "Request ID:      << pipeline.parameters.showroom_request_id >>"
+            echo "Reason:          << pipeline.parameters.rollback_reason >>"
+            echo "======================================"
+            
+            CALLBACK_PAYLOAD=$(cat \<<EOF
+            {
+              "event": "<< parameters.event >>",
+              "request_id": "<< pipeline.parameters.showroom_request_id >>",
+              "service": {
+                "name": "${SERVICE_NAME}",
+                "repository": "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
+              },
+              "rollback": {
+                "target_version": "<< pipeline.parameters.tag >>",
+                "current_version": "<< pipeline.parameters.current_version >>",
+                "environment": "<< pipeline.parameters.environment >>",
+                "namespace": "<< pipeline.parameters.namespace >>",
+                "status": "<< parameters.status >>",
+                "region": "<< parameters.region >>",
+                "reason": "<< pipeline.parameters.rollback_reason >>",
+                "pipeline_number": "<< pipeline.number >>",
+                "workflow_id": "${CIRCLE_WORKFLOW_ID}"
+              },
+              "triggered_by": {
+                "mode": "<< pipeline.parameters.trigger_mode >>",
+                "user": "<< pipeline.parameters.requested_by >>"
+              },
+              "message": "<< parameters.message >>",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }
+            EOF
+            )
+            
+            echo ""
+            echo "Showroom Callback Payload:"
+            echo "${CALLBACK_PAYLOAD}" | jq '.' 2>/dev/null || echo "${CALLBACK_PAYLOAD}"
+            
+            CALLBACK_URL="<< pipeline.parameters.showroom_callback_url >>"
+            if [ -n "${CALLBACK_URL}" ]; then
+              curl -s -X POST "${CALLBACK_URL}" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: << pipeline.parameters.showroom_request_id >>" \
+                -d "${CALLBACK_PAYLOAD}" || echo "Callback sent (or endpoint not configured)"
+            elif [ -n "${SHOWROOM_WEBHOOK_URL:-}" ]; then
+              curl -s -X POST "${SHOWROOM_WEBHOOK_URL}/callbacks" \
+                -H "Content-Type: application/json" \
+                -d "${CALLBACK_PAYLOAD}" || echo "Callback sent (or endpoint not configured)"
+            fi
+
+  setup-eks:
+    parameters:
+      aws-region:
+        type: string
+      cluster-name:
+        type: string
+    steps:
+      - aws-cli/setup:
+          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          region: << parameters.aws-region >>
+          profile_name: circleci-oidc
+          role_session_name: circleci-rollback-<< pipeline.number >>
+          session_duration: "1800"
+      - run:
+          name: Configure kubectl
+          command: aws eks update-kubeconfig --name << parameters.cluster-name >> --region << parameters.aws-region >> --profile circleci-oidc
+
+jobs:
+  rollback-start:
+    description: User Initiates Manual Rollback via Showroom
+    executor: deploy
+    steps:
+      - set-service-name
+      - run:
+          name: Validate Showroom manual rollback trigger
+          command: |
+            echo "======================================"
+            echo "User Initiates Manual Rollback via Showroom"
+            echo "======================================"
+            echo "Trigger Mode:    << pipeline.parameters.trigger_mode >>"
+            echo "Service Name:    << pipeline.parameters.service_name >>"
+            echo "Environment:     << pipeline.parameters.environment >>"
+            echo "Region:          << pipeline.parameters.region >>"
+            echo "Namespace:       << pipeline.parameters.namespace >>"
+            echo "Request ID:      << pipeline.parameters.showroom_request_id >>"
+            echo "Requested By:    << pipeline.parameters.requested_by >>"
+            echo "Reason:          << pipeline.parameters.rollback_reason >>"
+            echo "======================================"
+            
+            if [ -z "<< pipeline.parameters.tag >>" ]; then
+              echo ""
+              echo "ERROR: 'tag' parameter is required for rollback!"
+              echo ""
+              echo "Showroom self-service action requires:"
+              echo "  - service_name: backend, frontend, cron-jobs, shared-libraries, sql-scripts"
+              echo "  - environment: Staging or Production"
+              echo "  - region: NA or EU"
+              echo "  - namespace: site-cars or backend"
+              echo "  - tag: Docker image tag to rollback TO"
+              echo "  - current_version: Current deployed version"
+              exit 1
+            fi
+            
+            REGION="<< pipeline.parameters.region >>"
+            if [ "$REGION" = "NA" ]; then
+              INTERNAL_REGION="namer"
+            elif [ "$REGION" = "EU" ]; then
+              INTERNAL_REGION="emea"
+            else
+              INTERNAL_REGION="$REGION"
+            fi
+            echo "export INTERNAL_REGION=${INTERNAL_REGION}" >> $BASH_ENV
+            echo ""
+            echo "Region mapping: $REGION -> $INTERNAL_REGION"
+      - run:
+          name: Rollback summary
+          command: |
+            echo "======================================"
+            echo "SHOWROOM MANUAL ROLLBACK"
+            echo "======================================"
+            echo "Service:         << pipeline.parameters.service_name >>"
+            echo "Environment:     << pipeline.parameters.environment >>"
+            echo "Region:          << pipeline.parameters.region >> (${INTERNAL_REGION})"
+            echo "Namespace:       << pipeline.parameters.namespace >>"
+            echo "Rolling back to: << pipeline.parameters.tag >>"
+            echo "Current version: << pipeline.parameters.current_version >>"
+            echo "Trigger mode:    << pipeline.parameters.trigger_mode >>"
+            echo "Reason:          << pipeline.parameters.rollback_reason >>"
+            echo "======================================"
+      - notify-showroom-rollback:
+          event: rollback_started
+          status: in_progress
+          message: "Rollback initiated - reverting << pipeline.parameters.service_name >> to version << pipeline.parameters.tag >>"
+
+  rollback-region:
+    parameters:
+      region:
+        type: enum
+        enum: ["namer", "emea"]
+      aws-region:
+        type: string
+      cluster-name:
+        type: string
+      environment-name:
+        type: string
+    executor: deploy
+    steps:
+      - checkout
+      - set-service-name
+      - notify-showroom-rollback:
+          event: rollback_progress
+          status: in_progress
+          region: << parameters.region >>
+          message: "Rolling back << parameters.region >> to version << pipeline.parameters.tag >>"
+      - setup-eks:
+          aws-region: << parameters.aws-region >>
+          cluster-name: << parameters.cluster-name >>
+      - install-argo-rollouts-plugin
+      - run:
+          name: Abort any in-progress Argo Rollout
+          command: |
+            echo "Aborting any in-progress rollout..."
+            kubectl-argo-rollouts abort ${SERVICE_NAME} -n << pipeline.parameters.namespace >> || true
+      - run:
+          name: Rollback with Helm (<< parameters.region >>)
+          command: |
+            echo "======================================"
+            echo "Showroom Manual Rollback - << parameters.region >>"
+            echo "======================================"
+            echo "Target Version: << pipeline.parameters.tag >>"
+            echo "Environment:    << pipeline.parameters.environment >>"
+            echo "Reason:         << pipeline.parameters.rollback_reason >>"
+            echo "======================================"
+            
+            helm upgrade --atomic --install ${SERVICE_NAME} ./helm \
+              --namespace << pipeline.parameters.namespace >> \
+              --set fullnameOverride=${SERVICE_NAME} \
+              --set image.tag=<< pipeline.parameters.tag >> \
+              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set rollout.enabled=true \
+              --set region=<< parameters.region >> \
+              --set istio.gateway=istio-ingress/<< parameters.region >>-istio-gateway-subdomains \
+              --set circleci.componentName=${SERVICE_NAME} \
+              --set circleci.version=<< pipeline.parameters.tag >>
+      - run:
+          name: Wait for rollback completion
+          command: |
+            kubectl-argo-rollouts status ${SERVICE_NAME} -n << pipeline.parameters.namespace >> --timeout=300s
+      - run:
+          name: Log to Snowflake, Notify Showroom - Success
+          command: |
+            echo "Snowflake: rollback_success_<< parameters.region >> | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      - notify-showroom-rollback:
+          event: rollback_success
+          status: success
+          region: << parameters.region >>
+          message: "Rollback completed for << parameters.region >>"
+      - run:
+          name: Notify Taillight - Success
+          command: |
+            echo "Taillight: rollback_success - << parameters.region >>"
+      - run:
+          name: Notify Showroom, Taillight - Failure
+          when: on_fail
+          command: |
+            echo "Rollback failed for << parameters.region >>"
+            echo "Taillight: rollback_failure - << parameters.region >>"
+            
+            CALLBACK_URL="<< pipeline.parameters.showroom_callback_url >>"
+            if [ -n "${CALLBACK_URL}" ]; then
+              curl -s -X POST "${CALLBACK_URL}" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: << pipeline.parameters.showroom_request_id >>" \
+                -d "{\"event\":\"rollback_failure\",\"service_name\":\"${SERVICE_NAME}\",\"version\":\"<< pipeline.parameters.tag >>\",\"region\":\"<< parameters.region >>\",\"status\":\"failed\"}" || true
+            fi
+
+  rollback-webhook:
+    description: Handle Showroom webhook-triggered manual rollbacks
+    executor: deploy
+    environment:
+      WEBHOOK_BODY: << pipeline.trigger_parameters.webhook.body >>
+    steps:
+      - checkout
+      - run:
+          name: Parse Showroom manual rollback webhook payload
+          command: |
+            echo "======================================"
+            echo "User Initiates Manual Rollback via Showroom (Webhook)"
+            echo "======================================"
+            echo "Raw Payload:"
+            echo "$WEBHOOK_BODY" | jq '.' 2>/dev/null || echo "$WEBHOOK_BODY"
+            echo "======================================"
+            
+            export SERVICE_NAME=$(echo "$WEBHOOK_BODY" | jq -r '.service_name // ""')
+            export ENVIRONMENT=$(echo "$WEBHOOK_BODY" | jq -r '.environment // "Production"')
+            export SHOWROOM_REGION=$(echo "$WEBHOOK_BODY" | jq -r '.region // "NA"')
+            export NAMESPACE=$(echo "$WEBHOOK_BODY" | jq -r '.namespace // "site-cars"')
+            export TAG=$(echo "$WEBHOOK_BODY" | jq -r '.tag // ""')
+            export CURRENT_VERSION=$(echo "$WEBHOOK_BODY" | jq -r '.current_version // ""')
+            
+            export SHOWROOM_REQUEST_ID=$(echo "$WEBHOOK_BODY" | jq -r '.request_id // ""')
+            export REQUESTED_BY=$(echo "$WEBHOOK_BODY" | jq -r '.requested_by // "showroom-webhook"')
+            export SHOWROOM_CALLBACK_URL=$(echo "$WEBHOOK_BODY" | jq -r '.callback_url // ""')
+            export ROLLBACK_REASON=$(echo "$WEBHOOK_BODY" | jq -r '.reason // .rollback_reason // "Showroom-initiated rollback"')
+            
+            if [ "$SHOWROOM_REGION" = "NA" ]; then
+              INTERNAL_REGION="namer"
+              CLUSTER="cera-usw2-namer"
+              AWS_REGION="us-west-2"
+            elif [ "$SHOWROOM_REGION" = "EU" ]; then
+              INTERNAL_REGION="emea"
+              CLUSTER="cera-euw2-emea"
+              AWS_REGION="eu-west-2"
+            else
+              INTERNAL_REGION="$SHOWROOM_REGION"
+              [ "$SHOWROOM_REGION" = "emea" ] && CLUSTER="cera-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="cera-usw2-namer" AWS_REGION="us-west-2"
+            fi
+            
+            if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+              echo "ERROR: 'tag' (target version) is required in webhook payload"
+              exit 1
+            fi
+            
+            if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "null" ]; then
+              SERVICE_NAME=$(echo "${CIRCLE_PROJECT_REPONAME}" | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+            fi
+            
+            echo ""
+            echo "Parsed Showroom Configuration:"
+            echo "  Service:         $SERVICE_NAME"
+            echo "  Environment:     $ENVIRONMENT"
+            echo "  Region:          $SHOWROOM_REGION -> $INTERNAL_REGION"
+            echo "  Namespace:       $NAMESPACE"
+            echo "  Target Version:  $TAG"
+            echo "  Current Version: $CURRENT_VERSION"
+            echo "  Cluster:         $CLUSTER"
+            echo "  Reason:          $ROLLBACK_REASON"
+            echo "  Request ID:      $SHOWROOM_REQUEST_ID"
+            echo "  Requested By:    $REQUESTED_BY"
+            
+            echo "export SERVICE_NAME=$SERVICE_NAME" >> $BASH_ENV
+            echo "export ENVIRONMENT=$ENVIRONMENT" >> $BASH_ENV
+            echo "export SHOWROOM_REGION=$SHOWROOM_REGION" >> $BASH_ENV
+            echo "export INTERNAL_REGION=$INTERNAL_REGION" >> $BASH_ENV
+            echo "export NAMESPACE=$NAMESPACE" >> $BASH_ENV
+            echo "export TAG=$TAG" >> $BASH_ENV
+            echo "export CLUSTER_NAME=$CLUSTER" >> $BASH_ENV
+            echo "export AWS_REGION=$AWS_REGION" >> $BASH_ENV
+            echo "export SHOWROOM_REQUEST_ID=$SHOWROOM_REQUEST_ID" >> $BASH_ENV
+            echo "export SHOWROOM_CALLBACK_URL=$SHOWROOM_CALLBACK_URL" >> $BASH_ENV
+            echo "export REQUESTED_BY=$REQUESTED_BY" >> $BASH_ENV
+            echo "export ROLLBACK_REASON=$ROLLBACK_REASON" >> $BASH_ENV
+      - run:
+          name: Notify Showroom - rollback started
+          command: |
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"rollback_started\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"target_version\":\"$TAG\",\"reason\":\"$ROLLBACK_REASON\",\"status\":\"in_progress\"}" || true
+            fi
+      - aws-cli/setup:
+          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          region: us-west-2
+      - run:
+          name: Configure kubectl
+          command: aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
+      - install-argo-rollouts-plugin
+      - run:
+          name: Abort any in-progress Argo Rollout
+          command: |
+            echo "Aborting any in-progress rollout..."
+            kubectl-argo-rollouts abort $SERVICE_NAME -n $NAMESPACE || true
+      - run:
+          name: Rollback with Helm
+          command: |
+            echo "======================================"
+            echo "Showroom Manual Rollback (Webhook)"
+            echo "======================================"
+            echo "Service:     $SERVICE_NAME"
+            echo "Environment: $ENVIRONMENT"
+            echo "Region:      $SHOWROOM_REGION ($INTERNAL_REGION)"
+            echo "Namespace:   $NAMESPACE"
+            echo "Version:     $TAG"
+            echo "Reason:      $ROLLBACK_REASON"
+            echo "======================================"
+            
+            helm upgrade --atomic --install $SERVICE_NAME ./helm \
+              --namespace $NAMESPACE \
+              --set fullnameOverride=$SERVICE_NAME \
+              --set image.tag=$TAG \
+              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set rollout.enabled=true \
+              --set region=$INTERNAL_REGION \
+              --set istio.gateway=istio-ingress/${INTERNAL_REGION}-istio-gateway-subdomains \
+              --set circleci.componentName=$SERVICE_NAME \
+              --set circleci.version=$TAG
+      - run:
+          name: Wait for rollback completion
+          command: kubectl-argo-rollouts status $SERVICE_NAME -n $NAMESPACE --timeout=300s
+      - run:
+          name: Log to Snowflake, Notify Showroom, Taillight - Success
+          command: |
+            echo "Snowflake: rollback_webhook_success | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Taillight: rollback_success"
+            
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"rollback_success\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"version\":\"$TAG\",\"status\":\"success\"}" || true
+            fi
+            
+            echo "======================================"
+            echo "SHOWROOM MANUAL ROLLBACK COMPLETE"
+            echo "======================================"
+            echo "Service:     $SERVICE_NAME"
+            echo "Environment: $ENVIRONMENT"
+            echo "Region:      $SHOWROOM_REGION"
+            echo "Version:     $TAG"
+            echo "Status:      SUCCESS"
+            echo "======================================"
+      - run:
+          name: Notify Showroom, Taillight - Failure
+          when: on_fail
+          command: |
+            echo "Taillight: rollback_failure"
+            
+            if [ -n "$SHOWROOM_CALLBACK_URL" ]; then
+              curl -s -X POST "$SHOWROOM_CALLBACK_URL" \
+                -H "Content-Type: application/json" \
+                -H "X-Showroom-Request-ID: $SHOWROOM_REQUEST_ID" \
+                -d "{\"event\":\"rollback_failure\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$SHOWROOM_REGION\",\"version\":\"$TAG\",\"status\":\"failed\"}" || true
+            fi
+
+workflows:
+  api-rollback:
+    when:
+      equal: [api, << pipeline.trigger_source >>]
+    jobs:
+      - rollback-start:
+          name: Initialize Rollback
+
+      - rollback-region:
+          name: Rollback Production NA
+          region: namer
+          aws-region: us-west-2
+          cluster-name: cera-usw2-namer
+          environment-name: Car-Gurus-Multi-Repo-Production-NA
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Initialize Rollback
+
+      - rollback-region:
+          name: Rollback Production EU
+          region: emea
+          aws-region: eu-west-2
+          cluster-name: cera-euw2-emea
+          environment-name: Car-Gurus-Multi-Repo-Production-EU
+          context: [cargurus_demo, cargurus-oidc]
+          requires:
+            - Initialize Rollback
+
+  webhook-rollback:
+    when:
+      and:
+        - equal: [webhook, << pipeline.trigger_source >>]
+        - << pipeline.trigger_parameters.webhook.body >>
+    jobs:
+      - rollback-webhook:
+          name: Port IDP Webhook Rollback
+          context: [cargurus_demo, cargurus-oidc]
