@@ -127,3 +127,4 @@ Automated updates for:
 - Argo Rollouts installed in clusters
 - Prometheus for canary analysis
 - GitHub Secrets: `AWS_ROLE_ARN`, `KUBE_CONFIG_*`
+
