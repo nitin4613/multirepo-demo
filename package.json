@@ -18,6 +18,8 @@
   "devDependencies": {
     "@cucumber/cucumber": "^10.0.0",
     "@playwright/test": "^1.40.0",
+    "@testing-library/react": "^14.1.0",
+    "@testing-library/jest-dom": "^6.1.0",
     "@types/jest": "^29.5.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",

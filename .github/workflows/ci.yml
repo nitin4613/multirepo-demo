@@ -22,10 +22,6 @@ permissions:
 
 jobs:
 
-  # ──────────────────────────────────────
-  # Stage 1: Build & Test (parallel)
-  # ──────────────────────────────────────
-
   comment-pr-build-number:
     name: Comment Build Number on PR
     runs-on: ubuntu-latest
@@ -38,7 +34,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `🔨 **Build Started** — Build Number: **#${context.runNumber}**`
+              body: `Build Started - Build Number: #${context.runNumber}`
             });
 
   unit-tests:
@@ -112,12 +108,8 @@ jobs:
         env:
           CI: "true"
 
-  # ──────────────────────────────────────
-  # Stage 2: Build & Publish Docker Image
-  # ──────────────────────────────────────
-
   build-and-publish:
-    name: Build & Publish Docker Image
+    name: Build and Publish Docker Image
     runs-on: ubuntu-latest
     needs: [unit-tests, frontend-tests]
     outputs:
@@ -145,10 +137,6 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # ──────────────────────────────────────
-  # Stage 3: Deploy to Staging (parallel multi-region)
-  # ──────────────────────────────────────
 
   deploy-staging:
     name: Deploy to Staging (${{ matrix.region }})
@@ -180,25 +168,21 @@ jobs:
           echo "Namespace: demo-staging"
           echo "======================================"
           echo ""
-          echo "→ Authenticating with AWS via OIDC..."
+          echo "Authenticating with AWS via OIDC..."
           echo "  aws eks update-kubeconfig --name ${{ matrix.cluster }} --region ${{ matrix.aws_region }}"
           echo ""
-          echo "→ Deploying with Helm..."
-          echo "  helm upgrade --atomic --install demo-service ./helm \\"
-          echo "    --namespace demo-staging \\"
-          echo "    --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \\"
-          echo "    --set image.tag=${{ github.run_number }} \\"
-          echo "    --set region=${{ matrix.region }} \\"
+          echo "Deploying with Helm..."
+          echo "  helm upgrade --atomic --install demo-service ./helm"
+          echo "    --namespace demo-staging"
+          echo "    --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          echo "    --set image.tag=${{ github.run_number }}"
+          echo "    --set region=${{ matrix.region }}"
           echo "    --set rollout.enabled=false"
           echo ""
-          echo "→ Waiting for rollout..."
+          echo "Waiting for rollout..."
           echo "  kubectl rollout status deployment/demo-service -n demo-staging --timeout=300s"
           echo ""
-          echo "✓ Deployment to ${{ matrix.region }} staging complete"
-
-  # ──────────────────────────────────────
-  # Stage 4: Smoke Tests (per region)
-  # ──────────────────────────────────────
+          echo "Deployment to ${{ matrix.region }} staging complete"
 
   smoke-tests:
     name: Smoke Tests (${{ matrix.region }})
@@ -214,23 +198,19 @@ jobs:
           echo "Running Smoke Tests - ${{ matrix.region }}"
           echo "======================================"
           echo ""
-          echo "→ Checking health endpoint..."
+          echo "Checking health endpoint..."
           echo "  curl -sf https://staging.${{ matrix.region }}.demo.dev/actuator/health"
-          echo '  Response: { "status": "UP" }'
+          echo "  Response: { \"status\": \"UP\" }"
           echo ""
-          echo "→ Checking readiness endpoint..."
+          echo "Checking readiness endpoint..."
           echo "  curl -sf https://staging.${{ matrix.region }}.demo.dev/actuator/health/readiness"
-          echo '  Response: { "status": "UP" }'
+          echo "  Response: { \"status\": \"UP\" }"
           echo ""
-          echo "→ Checking API endpoint..."
+          echo "Checking API endpoint..."
           echo "  curl -sf https://staging.${{ matrix.region }}.demo.dev/api/v1/resource"
-          echo '  Response: { "content": [], "totalElements": 0 }'
+          echo "  Response: { \"content\": [], \"totalElements\": 0 }"
           echo ""
-          echo "✓ All smoke tests passed for ${{ matrix.region }}"
-
-  # ──────────────────────────────────────
-  # Stage 5: E2E Tests (parallelized with shards)
-  # ──────────────────────────────────────
+          echo "All smoke tests passed for ${{ matrix.region }}"
 
   e2e-tests:
     name: E2E Tests (Shard ${{ matrix.shard }}/4)
@@ -274,6 +254,7 @@ jobs:
             --shard=${{ matrix.shard }}/4 \
             --reporter=junit,html
         env:
+          CI: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/junit.xml
 
       - name: Upload Test Results
@@ -284,10 +265,6 @@ jobs:
           path: |
             test-results/
             playwright-report/
-
-  # ──────────────────────────────────────
-  # Stage 6: Deployment Qualification
-  # ──────────────────────────────────────
 
   deployment-gate:
     name: Query Deployment Qualification
@@ -315,23 +292,19 @@ jobs:
           DEPLOY_FREEZE=$(yq '.deployment_freeze' service-meta.yml)
           SERVICE_NAME=$(yq '.service.name' service-meta.yml)
 
-          echo "Service:          ${SERVICE_NAME}"
-          echo "Deployment Mode:  ${DEPLOY_MODE}"
+          echo "Service:           ${SERVICE_NAME}"
+          echo "Deployment Mode:   ${DEPLOY_MODE}"
           echo "Deployment Freeze: ${DEPLOY_FREEZE}"
 
           if [ "$DEPLOY_FREEZE" = "true" ]; then
             echo ""
-            echo "❌ BLOCKED: Deployment freeze is active"
+            echo "BLOCKED: Deployment freeze is active"
             exit 1
           fi
 
           echo "deploy_mode=${DEPLOY_MODE}" >> $GITHUB_OUTPUT
           echo ""
-          echo "✓ Deployment qualified (mode: ${DEPLOY_MODE})"
-
-  # ──────────────────────────────────────
-  # Stage 7: Trigger Production Deploy
-  # ──────────────────────────────────────
+          echo "Deployment qualified (mode: ${DEPLOY_MODE})"
 
   trigger-prod-deploy:
     name: Trigger Production Deployment
@@ -348,9 +321,9 @@ jobs:
             echo "AUTO DEPLOYMENT MODE"
             echo "======================================"
             echo "Triggering production deployment automatically..."
-            echo "  → workflow_dispatch: deploy-prod.yml"
-            echo "  → Build: #${{ github.run_number }}"
-            echo "  → Commit: ${{ github.sha }}"
+            echo "  workflow_dispatch: deploy-prod.yml"
+            echo "  Build: #${{ github.run_number }}"
+            echo "  Commit: ${{ github.sha }}"
           else
             echo "======================================"
             echo "MANUAL DEPLOYMENT MODE"
@@ -359,6 +332,6 @@ jobs:
             echo "Production deployment requires manual trigger."
             echo ""
             echo "To deploy, go to:"
-            echo "  Actions → Production Deployment → Run workflow"
+            echo "  Actions > Production Deployment > Run workflow"
             echo "  Tag: ${{ github.run_number }}"
           fi

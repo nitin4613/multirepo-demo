@@ -14,13 +14,6 @@ java {
 
 repositories {
     mavenCentral()
-    maven {
-        url "https://maven.pkg.github.com/nitin4613/multirepo-demo"
-        credentials {
-            username = System.getenv('GITHUB_ACTOR') ?: ''
-            password = System.getenv('GITHUB_TOKEN') ?: ''
-        }
-    }
 }
 
 dependencies {
