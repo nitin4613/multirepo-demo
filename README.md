@@ -27,7 +27,6 @@ Demonstrates GitHub's end-to-end DevSecOps platform with GitHub Actions CI/CD, p
     rollback.yml          # Production rollback
     codeql.yml            # CodeQL security scanning (scheduled + PR)
     pr-validation.yml     # PR checks (lint, test, dependency review)
-    dependency-review.yml # Vulnerable dependency blocking
     secret-scanning.yml   # Gitleaks secret detection
   dependabot.yml          # Automated dependency updates
   CODEOWNERS              # Code ownership for review routing
@@ -54,24 +53,24 @@ SECURITY.md               # Security policy and disclosure
 
 Push to main triggers the full pipeline:
 
-1. **Unit Tests** — Java (Gradle + JaCoCo) and Frontend (Jest + ESLint)
-2. **Build & Publish** — Docker multi-stage build → ghcr.io with layer caching
-3. **Deployment Gate** — Checks `service-meta.yml` for freeze/mode
-4. **Staging Deploy** — Parallel Helm deploys to NA + EU via AWS OIDC
-5. **Smoke Tests** — Health check validation per region
-6. **E2E Tests** — Playwright with 4-shard parallelism
-7. **Production Trigger** — Dispatches production deploy workflow
+1. **Unit Tests** - Java (Gradle + JaCoCo) and Frontend (Jest + ESLint)
+2. **Build & Publish** - Docker multi-stage build -> ghcr.io with layer caching
+3. **Deployment Gate** - Checks `service-meta.yml` for freeze/mode
+4. **Staging Deploy** - Parallel Helm deploys to NA + EU via AWS OIDC
+5. **Smoke Tests** - Health check validation per region
+6. **E2E Tests** - Playwright with 4-shard parallelism
+7. **Production Trigger** - Dispatches production deploy workflow
 
 ### Production Deployment (deploy-prod.yml)
 
 Triggered via `workflow_dispatch` or called from CI:
 
-1. **Environment Approval** — GitHub Environment protection rules
-2. **Promote Image** — Tag as `prod-{version}`
-3. **Canary Deploy** — Argo Rollouts: 30% → 50% → 70% → 90% → 100%
-4. **Prometheus Analysis** — Automated success rate + latency checks
-5. **Full Rollout** — Promote on analysis pass
-6. **GitHub Release** — Auto-generated changelog
+1. **Environment Approval** - GitHub Environment protection rules
+2. **Promote Image** - Tag as `prod-{version}`
+3. **Canary Deploy** - Argo Rollouts: 30% -> 50% -> 70% -> 90% -> 100%
+4. **Prometheus Analysis** - Automated success rate + latency checks
+5. **Full Rollout** - Promote on analysis pass
+6. **GitHub Release** - Auto-generated changelog
 
 ### Rollback (rollback.yml)
 
@@ -84,10 +83,10 @@ Manual trigger with environment approval:
 
 ### GitHub Advanced Security
 
-- **CodeQL** — Static analysis for Java and JavaScript on every PR and weekly schedule
-- **Secret Scanning** — Detects leaked credentials in code and PR diffs
-- **Push Protection** — Blocks pushes containing secrets before they hit the repo
-- **Dependency Review** — Blocks PRs introducing known vulnerable dependencies
+- **CodeQL** - Static analysis for Java and JavaScript on every PR and weekly schedule
+- **Secret Scanning** - Detects leaked credentials in code and PR diffs
+- **Push Protection** - Blocks pushes containing secrets before they hit the repo
+- **Dependency Review** - Blocks PRs introducing known vulnerable dependencies
 
 ### Dependabot
 
@@ -107,10 +106,7 @@ Automated updates for:
 
 ## Multi-Region
 
-| Region | AWS Region | EKS Cluster | Namespace |
-|--------|------------|-------------|-----------|
-| NA (namer) | us-west-2 | cera-usw2-namer | demo-prod |
-| EU (emea) | eu-west-2 | cera-euw2-emea | demo-prod |
+The pipeline is designed for multi-region deployment across NA and EU. Staging and production deploys run in parallel per region using Helm and AWS OIDC for authentication. Actual cluster targets are configured via GitHub Secrets and environment variables, keeping the workflow portable across any Kubernetes provider.
 
 ## GitHub Environments
 
@@ -123,8 +119,6 @@ Automated updates for:
 
 - GitHub repo with Actions enabled
 - GitHub Advanced Security license (for CodeQL, secret scanning)
-- AWS EKS clusters in us-west-2 and eu-west-2
-- Argo Rollouts installed in clusters
-- Prometheus for canary analysis
-- GitHub Secrets: `AWS_ROLE_ARN`, `KUBE_CONFIG_*`
+- Kubernetes clusters (any provider) with Argo Rollouts and Prometheus
+- GitHub Secrets configured for cloud authentication and kubeconfig
 

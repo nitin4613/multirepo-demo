@@ -180,7 +180,7 @@ commands:
         type: string
     steps:
       - aws-cli/setup:
-          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          role_arn: arn:aws:iam::992382483259:role/demo-pipeline-role
           region: << parameters.aws-region >>
           profile_name: circleci-oidc
           role_session_name: circleci-rollback-<< pipeline.number >>
@@ -369,15 +369,15 @@ jobs:
             
             if [ "$IDP_REGION" = "NA" ]; then
               INTERNAL_REGION="namer"
-              CLUSTER="cera-usw2-namer"
+              CLUSTER="demo-usw2-namer"
               AWS_REGION="us-west-2"
             elif [ "$IDP_REGION" = "EU" ]; then
               INTERNAL_REGION="emea"
-              CLUSTER="cera-euw2-emea"
+              CLUSTER="demo-euw2-emea"
               AWS_REGION="eu-west-2"
             else
               INTERNAL_REGION="$IDP_REGION"
-              [ "$IDP_REGION" = "emea" ] && CLUSTER="cera-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="cera-usw2-namer" AWS_REGION="us-west-2"
+              [ "$IDP_REGION" = "emea" ] && CLUSTER="demo-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="demo-usw2-namer" AWS_REGION="us-west-2"
             fi
             
             if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
@@ -424,7 +424,7 @@ jobs:
                 -d "{\"event\":\"rollback_started\",\"service_name\":\"$SERVICE_NAME\",\"environment\":\"$ENVIRONMENT\",\"region\":\"$IDP_REGION\",\"target_version\":\"$TAG\",\"reason\":\"$ROLLBACK_REASON\",\"status\":\"in_progress\"}" || true
             fi
       - aws-cli/setup:
-          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          role_arn: arn:aws:iam::992382483259:role/demo-pipeline-role
           region: us-west-2
       - run:
           name: Configure kubectl
@@ -509,7 +509,7 @@ workflows:
           name: Rollback Production NA
           region: namer
           aws-region: us-west-2
-          cluster-name: cera-usw2-namer
+          cluster-name: demo-usw2-namer
           environment-name: Multi-Repo-Demo-Production-NA
           context: [demo_context, aws-oidc]
           requires:
@@ -519,7 +519,7 @@ workflows:
           name: Rollback Production EU
           region: emea
           aws-region: eu-west-2
-          cluster-name: cera-euw2-emea
+          cluster-name: demo-euw2-emea
           environment-name: Multi-Repo-Demo-Production-EU
           context: [demo_context, aws-oidc]
           requires:

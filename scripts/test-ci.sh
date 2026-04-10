@@ -32,7 +32,7 @@ validate_config() {
     echo ""
     circleci config validate "$CONFIG_FILE"
     echo ""
-    echo "✓ Config is valid!"
+    echo "OK Config is valid!"
 }
 
 process_config() {
@@ -55,7 +55,7 @@ run_local() {
     
     echo "Running job '$JOB_NAME' locally with Docker..."
     echo ""
-    echo "⚠️  Limitations:"
+    echo "NOTE  Limitations:"
     echo "   - Only docker executor works (not machine)"
     echo "   - Caching is skipped"
     echo "   - Workflows are not supported"
@@ -71,7 +71,7 @@ run_local() {
 trigger_pipeline() {
     echo "Triggering pipeline with local config..."
     echo ""
-    echo "⚠️  Prerequisites:"
+    echo "NOTE  Prerequisites:"
     echo "   1. Org admin must enable in Organization Settings > Advanced:"
     echo "      'Allow triggering pipelines with unversioned config'"
     echo "   2. You must be authenticated: circleci setup"

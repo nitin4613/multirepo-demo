@@ -678,7 +678,7 @@ workflows:
           name: Mach5 Deploy to Staging NA
           region: namer
           aws-region: us-west-2
-          cluster-name: cera-usw2-namer
+          cluster-name: demo-usw2-namer
           context: [demo_context, aws-oidc]
           requires:
             - Build & Publish Docker Image to Artifactory
@@ -687,7 +687,7 @@ workflows:
           name: Mach5 Deploy to Staging EU
           region: emea
           aws-region: eu-west-2
-          cluster-name: cera-euw2-emea
+          cluster-name: demo-euw2-emea
           context: [demo_context, aws-oidc]
           requires:
             - Build & Publish Docker Image to Artifactory

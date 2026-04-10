@@ -12,10 +12,10 @@ regions:
 
 environments:
   staging:
-    cluster: cera-usw2-namer
+    cluster: demo-usw2-namer
     namespace: demo-staging
   production:
-    cluster: cera-usw2-prod
+    cluster: demo-usw2-prod
     namespace: demo-prod
 
 idp:

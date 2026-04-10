@@ -82,11 +82,11 @@ commands:
           name: Set region config
           command: |
             if [ "<< parameters.region >>" = "emea" ]; then
-              echo "export CLUSTER_NAME=cera-euw2-emea" >> $BASH_ENV
+              echo "export CLUSTER_NAME=demo-euw2-emea" >> $BASH_ENV
               echo "export AWS_REGION=eu-west-2" >> $BASH_ENV
               echo "export ENVIRONMENT_NAME=Multi-Repo-Demo-Production-EU" >> $BASH_ENV
             else
-              echo "export CLUSTER_NAME=cera-usw2-namer" >> $BASH_ENV
+              echo "export CLUSTER_NAME=demo-usw2-namer" >> $BASH_ENV
               echo "export AWS_REGION=us-west-2" >> $BASH_ENV
               echo "export ENVIRONMENT_NAME=Multi-Repo-Demo-Production-NA" >> $BASH_ENV
             fi
@@ -105,7 +105,7 @@ commands:
   setup-eks:
     steps:
       - aws-cli/setup:
-          role_arn: arn:aws:iam::992382483259:role/cera-fe-pipeline-role
+          role_arn: arn:aws:iam::992382483259:role/demo-pipeline-role
           region: ${AWS_REGION}
           profile_name: circleci-oidc
           role_session_name: circleci-deploy-<< pipeline.number >>
@@ -632,15 +632,15 @@ jobs:
             
             if [ "$IDP_REGION" = "NA" ]; then
               INTERNAL_REGION="namer"
-              CLUSTER="cera-usw2-namer"
+              CLUSTER="demo-usw2-namer"
               AWS_REGION="us-west-2"
             elif [ "$IDP_REGION" = "EU" ]; then
               INTERNAL_REGION="emea"
-              CLUSTER="cera-euw2-emea"
+              CLUSTER="demo-euw2-emea"
               AWS_REGION="eu-west-2"
             else
               INTERNAL_REGION="$IDP_REGION"
-              [ "$IDP_REGION" = "emea" ] && CLUSTER="cera-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="cera-usw2-namer" AWS_REGION="us-west-2"
+              [ "$IDP_REGION" = "emea" ] && CLUSTER="demo-euw2-emea" AWS_REGION="eu-west-2" || CLUSTER="demo-usw2-namer" AWS_REGION="us-west-2"
             fi
             
             if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then

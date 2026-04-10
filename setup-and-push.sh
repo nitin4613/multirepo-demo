@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================"
-echo "  Multi-Repo Demo — Setup & Push Script"
+echo "  Multi-Repo Demo - Setup & Push Script"
 echo "========================================"
 echo ""
 
@@ -11,23 +11,23 @@ cd "$(dirname "$0")"
 # Step 1: Remove git lock file
 echo "Step 1: Removing git lock file..."
 rm -f .git/index.lock
-echo "  ✓ Lock file removed"
+echo "  OK Lock file removed"
 echo ""
 
 # Step 2: Remove old Java package directories
 echo "Step 2: Cleaning old Java package directories..."
 if [ -d "src/main/java/com/cargurus" ]; then
   rm -rf src/main/java/com/cargurus
-  echo "  ✓ Removed src/main/java/com/cargurus"
+  echo "  OK Removed src/main/java/com/cargurus"
 else
-  echo "  ✓ Already clean (src/main/java/com/cargurus not found)"
+  echo "  OK Already clean (src/main/java/com/cargurus not found)"
 fi
 
 if [ -d "src/test/java/com/cargurus" ]; then
   rm -rf src/test/java/com/cargurus
-  echo "  ✓ Removed src/test/java/com/cargurus"
+  echo "  OK Removed src/test/java/com/cargurus"
 else
-  echo "  ✓ Already clean (src/test/java/com/cargurus not found)"
+  echo "  OK Already clean (src/test/java/com/cargurus not found)"
 fi
 echo ""
 
@@ -36,9 +36,9 @@ echo "Step 3: Verifying new Java package structure..."
 if [ -f "src/main/java/com/multirepo/demo/service/Application.java" ] && \
    [ -f "src/main/java/com/multirepo/demo/service/HealthController.java" ] && \
    [ -f "src/test/java/com/multirepo/demo/service/HealthControllerTest.java" ]; then
-  echo "  ✓ All new Java files present"
+  echo "  OK All new Java files present"
 else
-  echo "  ✗ ERROR: New Java files missing. Check src/main/java/com/multirepo/demo/service/"
+  echo "  FAIL ERROR: New Java files missing. Check src/main/java/com/multirepo/demo/service/"
   exit 1
 fi
 echo ""
@@ -46,7 +46,7 @@ echo ""
 # Step 4: Remove this script and guide files from repo (don't commit them)
 echo "Step 4: Removing setup artifacts from repo..."
 rm -f DEMO-TALK-TRACK.md STEP-BY-STEP-GUIDE.md
-echo "  ✓ Removed guide files (should already be on Desktop)"
+echo "  OK Removed guide files (should already be on Desktop)"
 echo ""
 
 # Step 5: Verify zero cargurus/showroom references
@@ -55,11 +55,11 @@ CARGURUS_COUNT=$(grep -ri "cargurus" --include="*.yml" --include="*.yaml" --incl
 SHOWROOM_COUNT=$(grep -ri "showroom" --include="*.yml" --include="*.yaml" --include="*.java" --include="*.tsx" --include="*.ts" --include="*.json" --include="*.gradle" --include="*.md" --include="*.tpl" -l 2>/dev/null | wc -l | tr -d ' ')
 
 if [ "$CARGURUS_COUNT" -gt 0 ] || [ "$SHOWROOM_COUNT" -gt 0 ]; then
-  echo "  ⚠ WARNING: Found $CARGURUS_COUNT files with 'cargurus', $SHOWROOM_COUNT with 'showroom'"
+  echo "  NOTE WARNING: Found $CARGURUS_COUNT files with 'cargurus', $SHOWROOM_COUNT with 'showroom'"
   grep -ri "cargurus\|showroom" --include="*.yml" --include="*.yaml" --include="*.java" --include="*.tsx" --include="*.ts" --include="*.json" --include="*.gradle" --include="*.md" --include="*.tpl" -l 2>/dev/null
   echo "  Continuing anyway..."
 else
-  echo "  ✓ Zero matches — clean!"
+  echo "  OK Zero matches - clean!"
 fi
 echo ""
 
@@ -67,13 +67,13 @@ echo ""
 echo "Step 6: Setting git remote to nitin4613/multirepo-demo..."
 git remote remove origin 2>/dev/null || true
 git remote add origin git@github.com:nitin4613/multirepo-demo.git
-echo "  ✓ Remote set to: $(git remote get-url origin)"
+echo "  OK Remote set to: $(git remote get-url origin)"
 echo ""
 
 # Step 7: Stage everything
 echo "Step 7: Staging all changes..."
 git add -A
-echo "  ✓ Staged $(git diff --cached --stat | tail -1)"
+echo "  OK Staged $(git diff --cached --stat | tail -1)"
 echo ""
 
 # Step 8: Show what will be committed
@@ -101,21 +101,21 @@ git commit -m "Migrate CI/CD to GitHub Actions with full DevSecOps tooling
 - Update Helm charts, Kubernetes configs, and service metadata
 - Update all references to use new naming convention"
 echo ""
-echo "  ✓ Committed successfully"
+echo "  OK Committed successfully"
 echo ""
 
 # Step 10: Push
 echo "Step 10: Pushing to GitHub..."
 echo ""
 echo "  IMPORTANT: Make sure you've created the repo first:"
-echo "  https://github.com/new → name it 'multirepo-demo' under nitin4613"
+echo "  https://github.com/new -> name it 'multirepo-demo' under nitin4613"
 echo ""
 read -p "  Have you created the repo on GitHub? (y/n): " CONFIRM
 if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
   git branch -M main
   git push -u origin main
   echo ""
-  echo "  ✓ Pushed successfully!"
+  echo "  OK Pushed successfully!"
 else
   echo ""
   echo "  Skipping push. When ready, run:"
@@ -129,7 +129,7 @@ echo "  DONE! Next steps:"
 echo "========================================"
 echo ""
 echo "  1. Go to https://github.com/nitin4613/multirepo-demo/settings/security_analysis"
-echo "     → Enable Dependabot alerts, security updates, secret scanning, push protection"
+echo "     -> Enable Dependabot alerts, security updates, secret scanning, push protection"
 echo ""
 echo "  2. Run branch protection setup:"
 echo "     gh auth login"
@@ -141,4 +141,4 @@ echo "     echo '' >> README.md && git add README.md && git commit -m 'docs: tri
 echo ""
 echo "  4. Open your DEMO-TALK-TRACK.md from Desktop for tomorrow"
 echo ""
-echo "  Good luck! 🚀"
+echo "  Good luck! "

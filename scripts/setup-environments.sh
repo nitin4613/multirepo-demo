@@ -24,7 +24,7 @@ echo ""
 # Step 1: Get the authenticated user's ID (needed for reviewer config)
 echo "Step 1: Getting your GitHub user ID..."
 USER_ID=$(gh api user --jq '.id')
-echo "  ✓ User ID: $USER_ID"
+echo "  OK User ID: $USER_ID"
 echo ""
 
 # Step 2: Create Staging Environment (no protection rules)
@@ -42,7 +42,7 @@ gh api "repos/$REPO/environments/$STAGING_ENV" \
 }
 EOF
 
-echo "  ✓ Staging environment created"
+echo "  OK Staging environment created"
 echo "    - No required reviewers"
 echo "    - No wait timer"
 echo "    - Any branch can deploy"
@@ -72,7 +72,7 @@ gh api "repos/$REPO/environments/$PRODUCTION_ENV" \
 }
 EOF
 
-echo "  ✓ Production environment created"
+echo "  OK Production environment created"
 echo "    - Required reviewer: you ($USER_ID)"
 echo "    - Wait timer: 5 minutes"
 echo "    - Custom branch policy enabled"
@@ -91,12 +91,12 @@ gh api "repos/$REPO/environments/$PRODUCTION_ENV/deployment-branch-policies" \
 }
 EOF
 
-echo "  ✓ Only 'main' branch can deploy to production"
+echo "  OK Only 'main' branch can deploy to production"
 echo ""
 
 # Summary
 echo "=========================================="
-echo "Environments — Complete!"
+echo "Environments - Complete!"
 echo "=========================================="
 echo ""
 echo "  STAGING"

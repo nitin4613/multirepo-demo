@@ -1,5 +1,5 @@
 # Build stage - uses Gradle to build the JAR
-FROM gradle:8.5-jdk17 AS builder
+FROM gradle:8.12-jdk21 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY src ./src
 RUN gradle bootJar --no-daemon
 
 # Runtime stage - minimal JRE image
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 
 WORKDIR /application
 

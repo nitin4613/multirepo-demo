@@ -54,7 +54,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region us-west-2 \
-            --name cera-usw2-namer
+            --name demo-usw2-namer
 
       - name: Abort NA rollout
         if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
@@ -74,7 +74,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region eu-west-2 \
-            --name cera-euw2-emea
+            --name demo-euw2-emea
 
       - name: Abort EU rollout
         if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
@@ -102,7 +102,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region us-west-2 \
-            --name cera-usw2-namer
+            --name demo-usw2-namer
 
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -147,7 +147,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region eu-west-2 \
-            --name cera-euw2-emea
+            --name demo-euw2-emea
 
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -193,7 +193,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region us-west-2 \
-            --name cera-usw2-namer
+            --name demo-usw2-namer
 
       - name: Verify NA rollback
         if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
@@ -215,7 +215,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region eu-west-2 \
-            --name cera-euw2-emea
+            --name demo-euw2-emea
 
       - name: Verify EU rollback
         if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}

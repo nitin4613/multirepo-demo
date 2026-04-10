@@ -58,7 +58,7 @@ gh api "repos/$REPO/branches/$BRANCH/protection" \
 }
 EOF
 
-echo "✓ Branch protection rules configured"
+echo "OK Branch protection rules configured"
 echo "  - Require pull request reviews (1 approver)"
 echo "  - Dismiss stale reviews"
 echo "  - Require code owner reviews"
@@ -76,26 +76,26 @@ echo ""
 
 # Enable vulnerability alerts (Dependabot alerts)
 gh api "repos/$REPO/vulnerability-alerts" --method PUT 2>/dev/null && \
-  echo "  ✓ Dependabot alerts enabled" || \
-  echo "  ⚠ Dependabot alerts: may already be enabled or requires admin access"
+  echo "  OK Dependabot alerts enabled" || \
+  echo "  NOTE Dependabot alerts: may already be enabled or requires admin access"
 
 # Enable automated security fixes (Dependabot security updates)
 gh api "repos/$REPO/automated-security-fixes" --method PUT 2>/dev/null && \
-  echo "  ✓ Dependabot security updates enabled" || \
-  echo "  ⚠ Dependabot security updates: may already be enabled or requires admin access"
+  echo "  OK Dependabot security updates enabled" || \
+  echo "  NOTE Dependabot security updates: may already be enabled or requires admin access"
 
 # Note: Secret scanning and push protection are typically enabled at the
 # org level or via the repo settings UI. The API endpoints require GHAS license.
-# For the demo, enable these manually in Settings → Code security.
+# For the demo, enable these manually in Settings -> Code security.
 echo ""
-echo "  ℹ  Secret scanning & push protection:"
+echo "  INFO  Secret scanning & push protection:"
 echo "     Enable these in the GitHub UI at:"
 echo "     https://github.com/$REPO/settings/security_analysis"
 echo ""
 
 # Summary
 echo "=========================================="
-echo "Branch Protection — Complete!"
+echo "Branch Protection - Complete!"
 echo "=========================================="
 echo ""
 echo "  Repository:    $REPO"

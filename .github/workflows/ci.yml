@@ -43,10 +43,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Cache Gradle packages
@@ -60,7 +60,7 @@ jobs:
 
       - name: Setup Gradle Wrapper
         run: |
-          gradle wrapper --gradle-version 8.5
+          gradle wrapper --gradle-version 8.12
           chmod +x ./gradlew
 
       - name: Run Unit Tests
@@ -150,10 +150,10 @@ jobs:
         include:
           - region: namer
             aws_region: us-west-2
-            cluster: cera-usw2-namer
+            cluster: demo-usw2-namer
           - region: emea
             aws_region: eu-west-2
-            cluster: cera-euw2-emea
+            cluster: demo-euw2-emea
     steps:
       - uses: actions/checkout@v4
 
