@@ -89,7 +89,7 @@ jobs:
               --namespace << pipeline.deploy.namespace >> \
               --set fullnameOverride=<< pipeline.deploy.component_name >> \
               --set image.tag=<< pipeline.deploy.target_version >> \
-              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set image.repository=ghcr.io/nitin4613/multirepo-demo \
               --set rollout.enabled=true \
               --set region=<< parameters.region >> \
               --set istio.gateway=istio-ingress/<< parameters.region >>-istio-gateway-subdomains \
@@ -112,13 +112,13 @@ workflows:
           region: namer
           aws-region: us-west-2
           cluster-name: cera-usw2-namer
-          environment-name: Car-Gurus-Multi-Repo-Production-NA
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-NA
+          context: [demo_context, aws-oidc]
 
       - rollback-region:
           name: Rollback Production EU
           region: emea
           aws-region: eu-west-2
           cluster-name: cera-euw2-emea
-          environment-name: Car-Gurus-Multi-Repo-Production-EU
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-EU
+          context: [demo_context, aws-oidc]

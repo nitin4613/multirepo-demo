@@ -1,4 +1,4 @@
-package com.cargurus.service;
+package com.multirepo.demo.service;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

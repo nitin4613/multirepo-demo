@@ -2,10 +2,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}
+  name: {{ include "multirepo-demo-service.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
     circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
     circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
   annotations:
@@ -17,7 +17,7 @@ spec:
   revisionHistoryLimit: {{ .Values.rollout.revisionHistoryLimit | default 3 }}
   selector:
     matchLabels:
-      {{- include "cargurus-service.selectorLabels" . | nindent 6 }}
+      {{- include "multirepo-demo-service.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -31,7 +31,7 @@ spec:
         {{- if .Values.istio.enabled }}
         sidecar.istio.io/inject: "true"
         {{- end }}
-        {{- include "cargurus-service.selectorLabels" . | nindent 8 }}
+        {{- include "multirepo-demo-service.selectorLabels" . | nindent 8 }}
         circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
         circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
     spec:
@@ -39,7 +39,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "cargurus-service.serviceAccountName" . }}
+      serviceAccountName: {{ include "multirepo-demo-service.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -96,14 +96,14 @@ spec:
     canary:
       analysis:
         templates:
-          - templateName: {{ include "cargurus-service.fullname" . }}-success-rate
-      canaryService: {{ include "cargurus-service.fullname" . }}-canary
-      stableService: {{ include "cargurus-service.fullname" . }}-stable
+          - templateName: {{ include "multirepo-demo-service.fullname" . }}-success-rate
+      canaryService: {{ include "multirepo-demo-service.fullname" . }}-canary
+      stableService: {{ include "multirepo-demo-service.fullname" . }}-stable
       {{- if .Values.istio.enabled }}
       trafficRouting:
         istio:
           virtualService:
-            name: {{ include "cargurus-service.fullname" . }}-vsvc
+            name: {{ include "multirepo-demo-service.fullname" . }}-vsvc
             routes:
               - primary
       {{- end }}

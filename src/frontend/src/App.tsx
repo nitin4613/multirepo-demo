@@ -3,7 +3,7 @@ import React from 'react';
 function App() {
   return (
     <div className="App">
-      <h1>CarGurus Multi-Repo Service</h1>
+      <h1>Multi-Repo Demo Service</h1>
     </div>
   );
 }

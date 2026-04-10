@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}
+  name: {{ include "multirepo-demo-service.fullname" . }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
   ports:
@@ -13,17 +13,17 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "cargurus-service.selectorLabels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.selectorLabels" . | nindent 4 }}
 {{- end }}
 ---
 {{- if .Values.rollout.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-canary
+  name: {{ include "multirepo-demo-service.fullname" . }}-canary
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
     service-type: canary
 spec:
   type: {{ .Values.service.type }}
@@ -33,15 +33,15 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "cargurus-service.selectorLabels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.selectorLabels" . | nindent 4 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-stable
+  name: {{ include "multirepo-demo-service.fullname" . }}-stable
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
     service-type: stable
 spec:
   type: {{ .Values.service.type }}
@@ -51,5 +51,5 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "cargurus-service.selectorLabels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.selectorLabels" . | nindent 4 }}
 {{- end }}

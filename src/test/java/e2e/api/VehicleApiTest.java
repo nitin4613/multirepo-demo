@@ -13,7 +13,7 @@ public class VehicleApiTest {
 
     @BeforeAll
     public static void setup() {
-        RestAssured.baseURI = "https://api.staging.cargurus.com";
+        RestAssured.baseURI = "https://api.staging.demo.com";
     }
 
     @Test

@@ -5,7 +5,7 @@ plugins {
     id 'jacoco'
 }
 
-group = 'com.cargurus'
+group = 'com.multirepo.demo'
 version = '1.0.0-SNAPSHOT'
 
 java {
@@ -15,10 +15,10 @@ java {
 repositories {
     mavenCentral()
     maven {
-        url "https://artifactory.cargurus.com/artifactory/libs-release"
+        url "https://maven.pkg.github.com/nitin4613/multirepo-demo"
         credentials {
-            username = System.getenv('ARTIFACTORY_USERNAME') ?: ''
-            password = System.getenv('ARTIFACTORY_PASSWORD') ?: ''
+            username = System.getenv('GITHUB_ACTOR') ?: ''
+            password = System.getenv('GITHUB_TOKEN') ?: ''
         }
     }
 }

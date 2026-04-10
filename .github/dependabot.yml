@@ -1,0 +1,41 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+      - npm
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+      - gradle
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: github-actions
+    directory: .github/workflows
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+      - github-actions
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+      - docker
+    open-pull-requests-limit: 10

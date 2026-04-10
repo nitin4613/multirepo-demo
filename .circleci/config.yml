@@ -29,7 +29,7 @@ parameters:
   deploy_namespace:
     description: Target namespace for deployment
     type: string
-    default: "cargurus-prod"
+    default: "demo-prod"
 
 executors:
   jdk17:
@@ -150,7 +150,7 @@ commands:
             echo "  Failure metric recorded"
 
   notify-idp:
-    description: Send deployment notification to IDP (Showroom/Port)
+    description: Send deployment notification to IDP (IDP/Port)
     parameters:
       event:
         type: enum
@@ -256,7 +256,7 @@ commands:
                 "required_parameters": {
                   "tag": "<< parameters.version >>",
                   "service_name": "${SERVICE_NAME}",
-                  "namespace": "cargurus-prod"
+                  "namespace": "demo-prod"
                 },
                 "config_file": "api-deploy.yml"
               },
@@ -290,22 +290,22 @@ commands:
             echo "======================================"
             echo ""
             echo "This service is configured for MANUAL deployment."
-            echo "Production deployment must be triggered via IDP/Showroom."
+            echo "Production deployment must be triggered via IDP/IDP."
             echo ""
             echo "To deploy to production, use one of these methods:"
             echo ""
-            echo "1. IDP/Showroom UI:"
-            echo "   Navigate to the service in Showroom and click 'Deploy'"
+            echo "1. IDP/IDP UI:"
+            echo "   Navigate to the service in IDP and click 'Deploy'"
             echo ""
             echo "2. CircleCI API:"
             echo "   curl -X POST https://circleci.com/api/v2/project/github/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/pipeline \\"
             echo "     -H 'Circle-Token: \${CIRCLE_TOKEN}' \\"
             echo "     -H 'Content-Type: application/json' \\"
-            echo "     -d '{\"parameters\": {\"tag\": \"<< parameters.version >>\", \"service_name\": \"${SERVICE_NAME}\", \"namespace\": \"cargurus-prod\"}}'"
+            echo "     -d '{\"parameters\": {\"tag\": \"<< parameters.version >>\", \"service_name\": \"${SERVICE_NAME}\", \"namespace\": \"demo-prod\"}}'"
             echo ""
             echo "3. Webhook:"
             echo "   POST to the configured webhook endpoint with:"
-            echo "   {\"service_name\": \"${SERVICE_NAME}\", \"tag\": \"<< parameters.version >>\", \"namespace\": \"cargurus-prod\"}"
+            echo "   {\"service_name\": \"${SERVICE_NAME}\", \"tag\": \"<< parameters.version >>\", \"namespace\": \"demo-prod\"}"
             echo ""
             echo "======================================"
 
@@ -400,8 +400,8 @@ jobs:
           name: Build and push to GHCR
           command: |
             echo "${GH_TOKEN}" | docker login ghcr.io -u ${CIRCLE_PROJECT_USERNAME} --password-stdin
-            docker build -t ghcr.io/awesomecicd/${SERVICE_NAME}:<< pipeline.number >> -f Dockerfile .
-            docker push ghcr.io/awesomecicd/${SERVICE_NAME}:<< pipeline.number >>
+            docker build -t ghcr.io/nitin4613/${SERVICE_NAME}:<< pipeline.number >> -f Dockerfile .
+            docker push ghcr.io/nitin4613/${SERVICE_NAME}:<< pipeline.number >>
       - notify-taillight:
           status: "success"
           stage: "build-publish"
@@ -442,10 +442,10 @@ jobs:
             echo "Image: ${IMAGE_NAME}"
             echo "Service: ${SERVICE_NAME}"
             echo "Region: << parameters.region >>"
-            echo "Namespace: cargurus-demo"
+            echo "Namespace: demo-staging"
             echo "======================================"
             helm upgrade --atomic --install ${SERVICE_NAME} ./helm \
-              --namespace cargurus-demo \
+              --namespace demo-staging \
               --set fullnameOverride=${SERVICE_NAME} \
               --set image.repository=ghcr.io/$(echo ${CIRCLE_PROJECT_USERNAME} | tr '[:upper:]' '[:lower:]')/$(echo ${CIRCLE_PROJECT_REPONAME} | tr '[:upper:]' '[:lower:]') \
               --set image.tag=<< pipeline.number >> \
@@ -462,7 +462,7 @@ jobs:
           name: Wait for rollout to complete
           command: |
             kubectl rollout status deployment/${SERVICE_NAME} \
-              -n cargurus-demo --timeout=300s
+              -n demo-staging --timeout=300s
       - log-snowflake:
           event-type: "staging_deploy"
       - log-snowflake-failure:
@@ -540,7 +540,7 @@ jobs:
             echo "Region: << parameters.region >>"
             echo "======================================"
             echo "Checking API health endpoints..."
-            echo "curl -s https://staging.<< parameters.region >>.cargurus.com/actuator/health"
+            echo "curl -s https://staging.<< parameters.region >>.demo.com/actuator/health"
             echo "Response: { \"status\": \"UP\" }"
             echo ""
             echo "All smoke tests passed!"
@@ -628,7 +628,7 @@ jobs:
               echo "MANUAL DEPLOYMENT MODE"
               echo "======================================"
               echo "Registering deployment candidate with IDP..."
-              echo "Production deployment requires manual trigger via IDP/Showroom"
+              echo "Production deployment requires manual trigger via IDP/IDP"
             fi
       - when:
           condition: << pipeline.parameters.run_deploy >>
@@ -636,8 +636,8 @@ jobs:
             - trigger-pipeline/trigger:
                 branch: << pipeline.git.branch >>
                 definition_id: $DEPLOY_PIPELINE_DEFINITION_ID
-                parameters: "trigger_mode=auto,service_name=<< pipeline.parameters.service_name >>,tag=<< pipeline.number >>,namespace=cargurus-prod"
-                project_slug: github/AwesomeCICD/cargurus-multi-repo
+                parameters: "trigger_mode=auto,service_name=<< pipeline.parameters.service_name >>,tag=<< pipeline.number >>,namespace=demo-prod"
+                project_slug: github/nitin4613/multirepo-demo
                 token: $CIRCLE_TOKEN
       - when:
           condition:
@@ -662,14 +662,14 @@ workflows:
     jobs:
       - comment-pr-build-number:
           name: Comment Build Number on PR
-          context: [cargurus_demo]
+          context: [demo_context]
 
       - unit-tests:
           name: Run Unit Tests
 
       - build-and-publish:
           name: Build & Publish Docker Image to Artifactory
-          context: [cargurus_demo]
+          context: [demo_context]
           requires:
             - Comment Build Number on PR
             - Run Unit Tests
@@ -679,7 +679,7 @@ workflows:
           region: namer
           aws-region: us-west-2
           cluster-name: cera-usw2-namer
-          context: [cargurus_demo, cargurus-oidc]
+          context: [demo_context, aws-oidc]
           requires:
             - Build & Publish Docker Image to Artifactory
 
@@ -688,7 +688,7 @@ workflows:
           region: emea
           aws-region: eu-west-2
           cluster-name: cera-euw2-emea
-          context: [cargurus_demo, cargurus-oidc]
+          context: [demo_context, aws-oidc]
           requires:
             - Build & Publish Docker Image to Artifactory
 
@@ -709,12 +709,12 @@ workflows:
 
       - deployment-auth-check:
           name: Query D&S for Deployment Qualification
-          context: [cargurus_demo]
+          context: [demo_context]
           requires:
             - Run E2E Tests
 
       - trigger-prod-deploy:
           name: Trigger Production Deployment
-          context: [cargurus_demo]
+          context: [demo_context]
           requires:
             - Query D&S for Deployment Qualification

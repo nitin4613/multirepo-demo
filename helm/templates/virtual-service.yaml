@@ -2,25 +2,25 @@
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-vsvc
+  name: {{ include "multirepo-demo-service.fullname" . }}-vsvc
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
 spec:
   hosts:
-    - {{ .Values.istio.host | default (printf "%s.%s.cargurus.com" (include "cargurus-service.fullname" .) .Values.region) }}
+    - {{ .Values.istio.host | default (printf "%s.%s.demo.com" (include "multirepo-demo-service.fullname" .) .Values.region) }}
   gateways:
-    - {{ .Values.istio.gateway | default "istio-system/cargurus-gateway" }}
+    - {{ .Values.istio.gateway | default "istio-system/demo-gateway" }}
   http:
     - name: primary
       route:
         - destination:
-            host: {{ include "cargurus-service.fullname" . }}-stable
+            host: {{ include "multirepo-demo-service.fullname" . }}-stable
             port:
               number: {{ .Values.service.port }}
           weight: 100
         - destination:
-            host: {{ include "cargurus-service.fullname" . }}-canary
+            host: {{ include "multirepo-demo-service.fullname" . }}-canary
             port:
               number: {{ .Values.service.port }}
           weight: 0
@@ -28,12 +28,12 @@ spec:
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-destrule
+  name: {{ include "multirepo-demo-service.fullname" . }}-destrule
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
 spec:
-  host: {{ include "cargurus-service.fullname" . }}-stable
+  host: {{ include "multirepo-demo-service.fullname" . }}-stable
   trafficPolicy:
     connectionPool:
       tcp:

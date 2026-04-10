@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "cargurus-service.name" -}}
+{{- define "multirepo-demo-service.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "cargurus-service.fullname" -}}
+{{- define "multirepo-demo-service.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,16 +24,16 @@ Create a default fully qualified app name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "cargurus-service.chart" -}}
+{{- define "multirepo-demo-service.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "cargurus-service.labels" -}}
-helm.sh/chart: {{ include "cargurus-service.chart" . }}
-{{ include "cargurus-service.selectorLabels" . }}
+{{- define "multirepo-demo-service.labels" -}}
+helm.sh/chart: {{ include "multirepo-demo-service.chart" . }}
+{{ include "multirepo-demo-service.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -43,17 +43,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "cargurus-service.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "cargurus-service.name" . }}
+{{- define "multirepo-demo-service.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "multirepo-demo-service.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Create the name of the service account to use
 */}}
-{{- define "cargurus-service.serviceAccountName" -}}
+{{- define "multirepo-demo-service.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
-{{- default (include "cargurus-service.fullname" .) .Values.serviceAccount.name }}
+{{- default (include "multirepo-demo-service.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}

@@ -1,4 +1,4 @@
-package com.cargurus.service;
+package com.multirepo.demo.service;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

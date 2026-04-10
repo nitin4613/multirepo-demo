@@ -1,21 +1,21 @@
 openapi: 3.0.3
 info:
-  title: CarGurus Multi-Repo Service API
+  title: Multi-Repo Demo Service API
   description: |
-    API specification for the CarGurus multi-repo microservice.
-    Used for SmartBear API Hub contract testing.
+    API specification for the multi-repo demo microservice.
+    Used for API contract testing.
   version: 1.0.0
   contact:
-    name: CarGurus Platform Team
-    email: platform@cargurus.com
+    name: Platform Engineering Team
+    email: platform@multirepo-demo.dev
 
 servers:
-  - url: https://{service}.staging.cargurus.com
+  - url: https://{service}.staging.multirepo-demo.dev
     description: Staging environment
     variables:
       service:
         default: api
-  - url: https://{service}.cargurus.com
+  - url: https://{service}.multirepo-demo.dev
     description: Production environment
     variables:
       service:

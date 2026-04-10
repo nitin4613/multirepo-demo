@@ -2,9 +2,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}
+  name: {{ include "multirepo-demo-service.fullname" . }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
     circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
     circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
   annotations:
@@ -17,7 +17,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "cargurus-service.selectorLabels" . | nindent 6 }}
+      {{- include "multirepo-demo-service.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -25,7 +25,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "cargurus-service.selectorLabels" . | nindent 8 }}
+        {{- include "multirepo-demo-service.selectorLabels" . | nindent 8 }}
         circleci.com/component-name: {{ .Values.circleci.componentName | default .Release.Name }}
         circleci.com/version: "{{ .Values.circleci.version | default .Values.image.tag }}"
     spec:
@@ -33,7 +33,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "cargurus-service.serviceAccountName" . }}
+      serviceAccountName: {{ include "multirepo-demo-service.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

@@ -155,7 +155,7 @@ jobs:
             echo "  Contract Version: 2.1.0"
             echo ""
             echo "Running contract tests..."
-            echo "  swaggerhub api:validate AwesomeCICD/${SERVICE_NAME}/2.1.0"
+            echo "  swaggerhub api:validate nitin4613/${SERVICE_NAME}/2.1.0"
             echo ""
             echo "Contract Validation Results:"
             echo "  [✓] Schema validation: PASSED"

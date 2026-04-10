@@ -1,0 +1,230 @@
+name: Production Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Service name to rollback'
+        required: true
+        type: string
+      target_version:
+        description: 'Target version to rollback to'
+        required: true
+        type: string
+      region:
+        description: 'Region to rollback'
+        required: true
+        type: choice
+        options:
+          - all
+          - namer
+          - emea
+
+env:
+  REGISTRY: ghcr.io
+  REGISTRY_ORG: nitin4613
+  DEMO_SERVICE: demo-service
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: prod-rollback-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  abort-rollout:
+    name: Abort In-Progress Argo Rollout
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials for NA
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-west-2
+
+      - name: Get kubeconfig for NA
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        run: |
+          aws eks update-kubeconfig \
+            --region us-west-2 \
+            --name cera-usw2-namer
+
+      - name: Abort NA rollout
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        run: |
+          echo "Aborting any in-progress Argo Rollout in NA..."
+          kubectl argo rollouts abort ${{ inputs.service_name }}-canary -n demo-prod || true
+
+      - name: Configure AWS credentials for EU
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
+
+      - name: Get kubeconfig for EU
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        run: |
+          aws eks update-kubeconfig \
+            --region eu-west-2 \
+            --name cera-euw2-emea
+
+      - name: Abort EU rollout
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        run: |
+          echo "Aborting any in-progress Argo Rollout in EU..."
+          kubectl argo rollouts abort ${{ inputs.service_name }}-canary -n demo-prod || true
+
+  rollback-na:
+    name: Rollback in NA Region
+    needs: abort-rollout
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-west-2
+
+      - name: Get kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region us-west-2 \
+            --name cera-usw2-namer
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Perform Helm rollback
+        run: |
+          echo "Rolling back ${{ inputs.service_name }} to version ${{ inputs.target_version }} in NA..."
+          REVISION=$(helm history ${{ inputs.service_name }}-canary -n demo-prod | grep ${{ inputs.target_version }} | awk '{print $1}' | head -1)
+          if [ -z "$REVISION" ]; then
+            echo "Target version not found in release history. Performing rollback to previous release..."
+            helm rollback ${{ inputs.service_name }}-canary -n demo-prod
+          else
+            echo "Rolling back to revision $REVISION..."
+            helm rollback ${{ inputs.service_name }}-canary $REVISION -n demo-prod
+          fi
+          helm list -n demo-prod
+
+      - name: Wait for rollback to complete
+        run: |
+          echo "Waiting for NA rollback to stabilize..."
+          kubectl rollout status deployment/${{ inputs.service_name }}-canary -n demo-prod --timeout=5m || true
+
+  rollback-eu:
+    name: Rollback in EU Region
+    needs: abort-rollout
+    runs-on: ubuntu-latest
+    environment: production
+    if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
+
+      - name: Get kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region eu-west-2 \
+            --name cera-euw2-emea
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Perform Helm rollback
+        run: |
+          echo "Rolling back ${{ inputs.service_name }} to version ${{ inputs.target_version }} in EU..."
+          REVISION=$(helm history ${{ inputs.service_name }}-canary -n demo-prod | grep ${{ inputs.target_version }} | awk '{print $1}' | head -1)
+          if [ -z "$REVISION" ]; then
+            echo "Target version not found in release history. Performing rollback to previous release..."
+            helm rollback ${{ inputs.service_name }}-canary -n demo-prod
+          else
+            echo "Rolling back to revision $REVISION..."
+            helm rollback ${{ inputs.service_name }}-canary $REVISION -n demo-prod
+          fi
+          helm list -n demo-prod
+
+      - name: Wait for rollback to complete
+        run: |
+          echo "Waiting for EU rollback to stabilize..."
+          kubectl rollout status deployment/${{ inputs.service_name }}-canary -n demo-prod --timeout=5m || true
+
+  verify:
+    name: Verify Rollback Completed
+    needs: [rollback-na, rollback-eu]
+    runs-on: ubuntu-latest
+    if: always() && (needs.rollback-na.result == 'success' || needs.rollback-eu.result == 'success')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials for NA
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-west-2
+
+      - name: Get kubeconfig for NA
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        run: |
+          aws eks update-kubeconfig \
+            --region us-west-2 \
+            --name cera-usw2-namer
+
+      - name: Verify NA rollback
+        if: ${{ inputs.region == 'all' || inputs.region == 'namer' }}
+        run: |
+          echo "Verifying NA rollback..."
+          kubectl get deployment ${{ inputs.service_name }}-canary -n demo-prod -o wide
+          kubectl get rollout ${{ inputs.service_name }}-canary -n demo-prod || echo "No Argo Rollout resource found"
+          kubectl get pods -n demo-prod -l app=${{ inputs.service_name }}-canary
+
+      - name: Configure AWS credentials for EU
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
+
+      - name: Get kubeconfig for EU
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        run: |
+          aws eks update-kubeconfig \
+            --region eu-west-2 \
+            --name cera-euw2-emea
+
+      - name: Verify EU rollback
+        if: ${{ inputs.region == 'all' || inputs.region == 'emea' }}
+        run: |
+          echo "Verifying EU rollback..."
+          kubectl get deployment ${{ inputs.service_name }}-canary -n demo-prod -o wide
+          kubectl get rollout ${{ inputs.service_name }}-canary -n demo-prod || echo "No Argo Rollout resource found"
+          kubectl get pods -n demo-prod -l app=${{ inputs.service_name }}-canary
+
+      - name: Rollback summary
+        run: |
+          echo "Rollback to version ${{ inputs.target_version }} completed for region: ${{ inputs.region }}"

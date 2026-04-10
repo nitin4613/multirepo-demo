@@ -1,0 +1,8 @@
+# Default code owner for all files
+* @nitin4613
+
+# GitHub configuration and workflows
+.github/ @nitin4613
+
+# Helm charts
+helm/ @nitin4613

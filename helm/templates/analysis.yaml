@@ -2,10 +2,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-success-rate
+  name: {{ include "multirepo-demo-service.fullname" . }}-success-rate
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
 spec:
   metrics:
     - name: istio-success-rate
@@ -20,13 +20,13 @@ spec:
             (
               sum(irate(istio_requests_total{
                 reporter="destination",
-                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
+                destination_service=~"{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
                 response_code!~"5.*"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
               )
               /
               sum(irate(istio_requests_total{
                 reporter="destination",
-                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+                destination_service=~"{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
               )
             ) or vector(1)
 
@@ -42,7 +42,7 @@ spec:
           query: >+
             histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{
               reporter="destination",
-              destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"
+              destination_service=~"{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"
             }[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])) by (le)) / 1000
     {{- end }}
 
@@ -59,13 +59,13 @@ spec:
             (
               sum(irate(istio_requests_total{
                 reporter="destination",
-                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
+                destination_service=~"{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local",
                 response_code=~"5.*"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
               )
               /
               sum(irate(istio_requests_total{
                 reporter="destination",
-                destination_service=~"{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
+                destination_service=~"{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local"}[{{ .Values.rollout.analysis.queryWindow | default "25s" }}])
               )
             ) or vector(0)
     {{- end }}

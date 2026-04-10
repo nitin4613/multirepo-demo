@@ -60,7 +60,7 @@ commands:
           command: |
             echo "Snowflake: << parameters.event >> | $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-  notify-showroom:
+  notify-idp:
     parameters:
       status:
         type: string
@@ -68,9 +68,9 @@ commands:
         type: string
     steps:
       - run:
-          name: Notify Showroom
+          name: Notify IDP
           command: |
-            echo "Showroom: << parameters.status >> - << parameters.message >>"
+            echo "IDP: << parameters.status >> - << parameters.message >>"
 
 jobs:
   promote-image:
@@ -84,7 +84,7 @@ jobs:
             echo "======================================"
             echo "Component: << pipeline.deploy.component_name >>"
             echo "Version:   << pipeline.deploy.target_version >>"
-            echo "Registry:  ghcr.io/awesomecicd/cargurus-multi-repo"
+            echo "Registry:  ghcr.io/nitin4613/multirepo-demo"
             echo "======================================"
             echo ""
             echo "Image promoted and ready for deployment"
@@ -124,7 +124,7 @@ jobs:
               --namespace << pipeline.deploy.namespace >> \
               --set fullnameOverride=<< pipeline.deploy.component_name >> \
               --set image.tag=<< pipeline.deploy.target_version >> \
-              --set image.repository=ghcr.io/awesomecicd/cargurus-multi-repo \
+              --set image.repository=ghcr.io/nitin4613/multirepo-demo \
               --set rollout.enabled=true \
               --set region=<< parameters.region >> \
               --set istio.gateway=istio-ingress/<< parameters.region >>-istio-gateway-subdomains \
@@ -144,11 +144,11 @@ jobs:
 
   monitor-namer:
     type: release
-    plan_name: Car-Gurus-Multi-Repo-Production-NA
+    plan_name: Multi-Repo-Demo-Production-NA
 
   monitor-emea:
     type: release
-    plan_name: Car-Gurus-Multi-Repo-Production-EU
+    plan_name: Multi-Repo-Demo-Production-EU
 
   wait-analysis:
     parameters:
@@ -252,15 +252,15 @@ workflows:
     jobs:
       - promote-image:
           name: Promote Docker Image to Production
-          context: [cargurus_demo]
+          context: [demo_context]
 
       - deploy-canary:
           name: Mach5 Deploy to Production Canary NA
           region: namer
           aws-region: us-west-2
           cluster-name: cera-usw2-namer
-          environment-name: Car-Gurus-Multi-Repo-Production-NA
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-NA
+          context: [demo_context, aws-oidc]
           requires:
             - Promote Docker Image to Production
 
@@ -269,8 +269,8 @@ workflows:
           region: emea
           aws-region: eu-west-2
           cluster-name: cera-euw2-emea
-          environment-name: Car-Gurus-Multi-Repo-Production-EU
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-EU
+          context: [demo_context, aws-oidc]
           requires:
             - Promote Docker Image to Production
 
@@ -289,8 +289,8 @@ workflows:
           region: namer
           aws-region: us-west-2
           cluster-name: cera-usw2-namer
-          environment-name: Car-Gurus-Multi-Repo-Production-NA
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-NA
+          context: [demo_context, aws-oidc]
           requires:
             - Monitor Release NA
 
@@ -299,8 +299,8 @@ workflows:
           region: emea
           aws-region: eu-west-2
           cluster-name: cera-euw2-emea
-          environment-name: Car-Gurus-Multi-Repo-Production-EU
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-EU
+          context: [demo_context, aws-oidc]
           requires:
             - Monitor Release EU
 
@@ -309,8 +309,8 @@ workflows:
           region: namer
           aws-region: us-west-2
           cluster-name: cera-usw2-namer
-          environment-name: Car-Gurus-Multi-Repo-Production-NA
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-NA
+          context: [demo_context, aws-oidc]
           requires:
             - Wait for Argo Rollouts Canary Analysis NA
 
@@ -319,14 +319,14 @@ workflows:
           region: emea
           aws-region: eu-west-2
           cluster-name: cera-euw2-emea
-          environment-name: Car-Gurus-Multi-Repo-Production-EU
-          context: [cargurus_demo, cargurus-oidc]
+          environment-name: Multi-Repo-Demo-Production-EU
+          context: [demo_context, aws-oidc]
           requires:
             - Wait for Argo Rollouts Canary Analysis EU
 
       - create-release:
           name: Create GitHub Release
-          context: [cargurus_demo]
+          context: [demo_context]
           requires:
             - Wait for Full Rollout by Argo NA
             - Wait for Full Rollout by Argo EU

@@ -2,17 +2,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "cargurus-service.fullname" . }}-loadtest-{{ .Release.Revision }}
+  name: {{ include "multirepo-demo-service.fullname" . }}-loadtest-{{ .Release.Revision }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "cargurus-service.labels" . | nindent 4 }}
+    {{- include "multirepo-demo-service.labels" . | nindent 4 }}
 spec:
   ttlSecondsAfterFinished: 60
   backoffLimit: 1
   template:
     metadata:
       labels:
-        app: {{ include "cargurus-service.fullname" . }}-loadtest
+        app: {{ include "multirepo-demo-service.fullname" . }}-loadtest
         sidecar.istio.io/inject: "false"
     spec:
       restartPolicy: Never
@@ -24,7 +24,7 @@ spec:
         - |
           echo "Starting load test for canary analysis..."
           for i in $(seq {{ .Values.loadtest.iterations | default 300 }}); do
-            curl -s -o /dev/null -w "%{http_code}" "http://{{ include "cargurus-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/actuator/health" || true
+            curl -s -o /dev/null -w "%{http_code}" "http://{{ include "multirepo-demo-service.fullname" . }}-canary.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/actuator/health" || true
             sleep {{ .Values.loadtest.interval | default "1" }}
           done
           echo "Load test complete"

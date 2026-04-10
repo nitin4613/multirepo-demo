@@ -4,6 +4,6 @@ import App from './App';
 
 test('renders title', () => {
   render(<App />);
-  const heading = screen.getByText(/CarGurus Multi-Repo Service/i);
+  const heading = screen.getByText(/Multi-Repo Demo Service/i);
   expect(heading).toBeInTheDocument();
 });

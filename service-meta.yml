@@ -13,17 +13,17 @@ regions:
 environments:
   staging:
     cluster: cera-usw2-namer
-    namespace: cargurus-demo
+    namespace: demo-staging
   production:
     cluster: cera-usw2-prod
-    namespace: cargurus-prod
+    namespace: demo-prod
 
 idp:
   enabled: true
-  platform: showroom
+  platform: github
 
   catalog:
-    service_id: cargurus-multi-repo-demo
+    service_id: multirepo-demo
     tier: medium
     owner: platform-engineering
     tags:
@@ -31,25 +31,20 @@ idp:
       - java
       - kubernetes
 
-  showroom:
-    services:
-      - backend
-      - frontend
-      - cron-jobs
-      - shared-libraries
-      - sql-scripts
-    environments:
-      - Staging
-      - Production
-    regions:
-      NA: namer
-      EU: emea
-    namespaces:
-      - site-cars
-      - backend
-    defaults:
-      region: NA
-      namespace: site-cars
+  services:
+    - backend
+    - frontend
+    - cron-jobs
+    - shared-libraries
+    - sql-scripts
+
+  environments:
+    - Staging
+    - Production
+
+  regions:
+    NA: namer
+    EU: emea
 
   deployment:
     require_approval: true
@@ -63,8 +58,6 @@ idp:
     on_staging_success: true
     on_deploy_complete: true
     on_deploy_failure: true
-    notify_taillight: true
-    log_snowflake: true
     slack_channel: "#deployments"
 
   webhook:
