@@ -4,38 +4,54 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
     target-branch: main
     labels:
       - dependencies
       - npm
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 2
+    groups:
+      npm-all:
+        patterns:
+          - "*"
 
   - package-ecosystem: gradle
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
     target-branch: main
     labels:
       - dependencies
       - gradle
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 2
+    groups:
+      gradle-all:
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: .github/workflows
     schedule:
       interval: weekly
+      day: monday
     target-branch: main
     labels:
       - dependencies
       - github-actions
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 2
+    groups:
+      actions-all:
+        patterns:
+          - "*"
 
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: weekly
+      day: monday
     target-branch: main
     labels:
       - dependencies
       - docker
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 2
