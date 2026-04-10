@@ -14,7 +14,7 @@ COPY src ./src
 RUN gradle bootJar --no-daemon
 
 # Runtime stage - minimal JRE image
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /application
 
