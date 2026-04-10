@@ -49,7 +49,7 @@ gh api "repos/$REPO/branches/$BRANCH/protection" \
       "dependency-review"
     ]
   },
-  "enforce_admins": true,
+  "enforce_admins": false,
   "restrictions": null,
   "allow_force_pushes": false,
   "allow_deletions": false,

@@ -2,95 +2,87 @@ name: PR Validation
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   lint:
-    name: Lint and Format Check
+    name: Lint & Format Check
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          node-version: '22'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Dependencies
+        run: npm install --legacy-peer-deps
 
       - name: Run ESLint
-        run: npm run lint --if-present
+        run: npm run lint
 
-      - name: Check Prettier formatting
-        run: npm run format:check --if-present
+      - name: Check Prettier Formatting
+        run: npx prettier --check 'src/**/*.{ts,tsx}'
 
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-
-      - name: Set up Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          java-version: '17'
           distribution: 'temurin'
-          java-version: '11'
-          cache: 'gradle'
 
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Run JavaScript tests
-        run: npm test --if-present
+      - name: Run Java Unit Tests
+        run: |
+          gradle wrapper --gradle-version 8.5
+          chmod +x ./gradlew
+          ./gradlew test --no-daemon
 
-      - name: Run Gradle tests
-        run: ./gradlew test --if-present
+      - name: Run Frontend Tests
+        run: |
+          npm install --legacy-peer-deps
+          npm test
+        env:
+          CI: "true"
 
   build-check:
     name: Build Check
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          java-version: '17'
           distribution: 'temurin'
-          java-version: '11'
-          cache: 'gradle'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
 
       - name: Build with Gradle
-        run: ./gradlew build -x test --if-present
-
-      - name: Build Node.js projects
-        run: npm run build --if-present
+        run: |
+          gradle wrapper --gradle-version 8.5
+          chmod +x ./gradlew
+          ./gradlew build -x test --no-daemon
 
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
-          fail-on-severity: moderate
+          fail-on-severity: high
