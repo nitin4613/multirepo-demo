@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results
           path: |
@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-test-results
           path: |
@@ -313,7 +313,7 @@ jobs:
 
       - name: Upload Smoke Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-tests-${{ matrix.region }}
           path: test-results/smoke/
@@ -353,7 +353,7 @@ jobs:
 
       - name: Upload Playwright Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
@@ -361,7 +361,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results-shard-${{ matrix.shard }}
           path: test-results/
@@ -438,7 +438,7 @@ jobs:
           EOF
 
       - name: Upload Deployment Candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deployment-candidate-${{ github.run_number }}
           path: deployment-candidates.txt
