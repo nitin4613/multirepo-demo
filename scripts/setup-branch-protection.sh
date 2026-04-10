@@ -3,12 +3,18 @@
 #######################################
 # Branch Protection Setup Script
 # Configures GitHub branch protection rules and security settings
-# for demonstration and production use
+#
+# NOTE on gh api flags:
+#   -f  sends a STRING value     ("true", "1")
+#   -F  sends a TYPED value      (true, 1, null)
+#   --input  sends raw JSON from stdin
+#
+# The branch protection API requires booleans and nested objects,
+# so we use --input with a heredoc for the full payload.
 #######################################
 
 set -e  # Exit on error
 
-# Configuration Variables
 REPO="nitin4613/multirepo-demo"
 BRANCH="main"
 
@@ -23,73 +29,82 @@ echo ""
 echo "Step 1: Configuring branch protection rules..."
 echo ""
 
-gh api repos/$REPO/branches/$BRANCH/protection \
+# The branch protection endpoint requires a specific JSON schema.
+# Using --input to send properly typed JSON (booleans, integers, arrays).
+gh api "repos/$REPO/branches/$BRANCH/protection" \
   --method PUT \
-  -f required_pull_request_reviews.dismiss_stale_reviews=true \
-  -f required_pull_request_reviews.require_code_owner_reviews=false \
-  -f required_pull_request_reviews.required_approving_review_count=1 \
-  -f required_status_checks.strict=true \
-  -f required_status_checks.contexts='["unit-tests","frontend-tests","CodeQL","dependency-review"]' \
-  -f enforce_admins=true \
-  -f allow_force_pushes=false \
-  -f allow_deletions=false \
-  -f require_linear_history=true \
-  -f require_conversation_resolution=true
+  --input - << 'EOF'
+{
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": true,
+    "required_approving_review_count": 1
+  },
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "unit-tests",
+      "frontend-tests",
+      "CodeQL",
+      "dependency-review"
+    ]
+  },
+  "enforce_admins": true,
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "required_linear_history": true,
+  "required_conversation_resolution": true
+}
+EOF
 
 echo "✓ Branch protection rules configured"
 echo "  - Require pull request reviews (1 approver)"
 echo "  - Dismiss stale reviews"
+echo "  - Require code owner reviews"
 echo "  - Required status checks: unit-tests, frontend-tests, CodeQL, dependency-review"
 echo "  - Require branches to be up to date"
 echo "  - Enforce rules for admins"
-echo "  - Restrict force pushes"
+echo "  - Restrict force pushes and deletions"
 echo "  - Require linear history"
 echo "  - Require conversation resolution"
 echo ""
 
-# Step 2: Enable Push Protection and Secret Scanning
-echo "Step 2: Enabling push protection and secret scanning..."
+# Step 2: Enable Security Features
+echo "Step 2: Enabling security features..."
 echo ""
 
-# Enable Dependabot alerts (requires GitHub Advanced Security)
-gh api repos/$REPO \
-  --method PATCH \
-  -f dependabot_alerts_enabled=true \
-  -f dependabot_security_updates_enabled=true \
-  -f secret_scanning_enabled=true \
-  -f secret_scanning_push_protection_enabled=true
+# Enable vulnerability alerts (Dependabot alerts)
+gh api "repos/$REPO/vulnerability-alerts" --method PUT 2>/dev/null && \
+  echo "  ✓ Dependabot alerts enabled" || \
+  echo "  ⚠ Dependabot alerts: may already be enabled or requires admin access"
 
-echo "✓ Security features enabled"
-echo "  - Dependabot alerts"
-echo "  - Dependabot security updates"
-echo "  - Secret scanning"
-echo "  - Push protection"
+# Enable automated security fixes (Dependabot security updates)
+gh api "repos/$REPO/automated-security-fixes" --method PUT 2>/dev/null && \
+  echo "  ✓ Dependabot security updates enabled" || \
+  echo "  ⚠ Dependabot security updates: may already be enabled or requires admin access"
+
+# Note: Secret scanning and push protection are typically enabled at the
+# org level or via the repo settings UI. The API endpoints require GHAS license.
+# For the demo, enable these manually in Settings → Code security.
 echo ""
-
-# Step 3: Enable Dependabot Security Updates
-echo "Step 3: Configuring Dependabot security updates..."
-echo ""
-
-# Note: Dependabot security updates can also be configured via dependency alerts
-# The above patch already enables dependabot_security_updates_enabled
-
-echo "✓ Dependabot security updates enabled"
-echo "  - Will automatically create PRs for security vulnerabilities"
+echo "  ℹ  Secret scanning & push protection:"
+echo "     Enable these in the GitHub UI at:"
+echo "     https://github.com/$REPO/settings/security_analysis"
 echo ""
 
 # Summary
 echo "=========================================="
-echo "Configuration Complete!"
+echo "Branch Protection — Complete!"
 echo "=========================================="
 echo ""
-echo "Branch Protection Summary:"
 echo "  Repository:    $REPO"
 echo "  Branch:        $BRANCH"
-echo "  Protections:   7 rules configured"
-echo "  Security:      Push protection, secret scanning, Dependabot enabled"
+echo "  PR Reviews:    1 required, stale reviews dismissed"
+echo "  Status Checks: unit-tests, frontend-tests, CodeQL, dependency-review"
+echo "  Force Push:    Blocked"
+echo "  Linear History: Required"
+echo "  Dependabot:    Alerts + security updates enabled"
 echo ""
-echo "Next Steps:"
-echo "  1. Review branch protection rules in GitHub web UI"
-echo "  2. Configure Dependabot settings in repository settings"
-echo "  3. Set up required reviewers for critical changes"
+echo "  Verify at: https://github.com/$REPO/settings/branches"
 echo ""

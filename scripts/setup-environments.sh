@@ -4,11 +4,13 @@
 # GitHub Environments Setup Script
 # Creates and configures deployment environments
 # with protection rules and review requirements
+#
+# NOTE: The environments API requires properly typed JSON.
+# We use --input with heredocs to ensure correct types.
 #######################################
 
 set -e  # Exit on error
 
-# Configuration Variables
 REPO="nitin4613/multirepo-demo"
 STAGING_ENV="staging"
 PRODUCTION_ENV="production"
@@ -19,85 +21,93 @@ echo "=========================================="
 echo "Repository: $REPO"
 echo ""
 
-# Step 1: Create Staging Environment
-echo "Step 1: Creating '$STAGING_ENV' environment..."
+# Step 1: Get the authenticated user's ID (needed for reviewer config)
+echo "Step 1: Getting your GitHub user ID..."
+USER_ID=$(gh api user --jq '.id')
+echo "  ✓ User ID: $USER_ID"
 echo ""
 
-gh api repos/$REPO/environments/$STAGING_ENV \
+# Step 2: Create Staging Environment (no protection rules)
+echo "Step 2: Creating '$STAGING_ENV' environment..."
+echo ""
+
+gh api "repos/$REPO/environments/$STAGING_ENV" \
   --method PUT \
-  -f wait_timer=0 \
-  -f reviewers='[]'
+  --input - << 'EOF'
+{
+  "wait_timer": 0,
+  "prevent_self_review": false,
+  "reviewers": [],
+  "deployment_branch_policy": null
+}
+EOF
 
-echo "✓ Staging environment created"
-echo "  - No required reviewers"
-echo "  - No wait timer"
-echo "  - Ready for immediate deployments"
+echo "  ✓ Staging environment created"
+echo "    - No required reviewers"
+echo "    - No wait timer"
+echo "    - Any branch can deploy"
 echo ""
 
-# Step 2: Create Production Environment
-echo "Step 2: Creating '$PRODUCTION_ENV' environment..."
+# Step 3: Create Production Environment (with protection rules)
+echo "Step 3: Creating '$PRODUCTION_ENV' environment..."
 echo ""
 
-# Create the production environment with protection rules
-gh api repos/$REPO/environments/$PRODUCTION_ENV \
+# Build the JSON payload with the actual user ID for reviewers
+gh api "repos/$REPO/environments/$PRODUCTION_ENV" \
   --method PUT \
-  -f wait_timer=5 \
-  -f reviewers='[{"type":"User","id":null}]'
+  --input - << EOF
+{
+  "wait_timer": 5,
+  "prevent_self_review": false,
+  "reviewers": [
+    {
+      "type": "User",
+      "id": $USER_ID
+    }
+  ],
+  "deployment_branch_policy": {
+    "protected_branches": false,
+    "custom_branch_policies": true
+  }
+}
+EOF
 
-echo "✓ Production environment created"
-echo "  - Required reviewers: Yes (at least 1)"
-echo "  - Wait timer: 5 minutes"
+echo "  ✓ Production environment created"
+echo "    - Required reviewer: you ($USER_ID)"
+echo "    - Wait timer: 5 minutes"
+echo "    - Custom branch policy enabled"
 echo ""
 
-# Step 3: Configure Deployment Branch Policy (main only)
-echo "Step 3: Configuring deployment branch policy..."
+# Step 4: Add deployment branch policy (main only)
+echo "Step 4: Restricting production deploys to 'main' branch..."
 echo ""
 
-# Set deployment branch policy to allow deployments from main only
-gh api repos/$REPO/environments/$PRODUCTION_ENV/deployment-branch-policy \
+gh api "repos/$REPO/environments/$PRODUCTION_ENV/deployment-branch-policies" \
   --method POST \
-  -f type='named' \
-  -f name='main'
+  --input - << 'EOF'
+{
+  "name": "main",
+  "type": "branch"
+}
+EOF
 
-echo "✓ Deployment branch policy configured"
-echo "  - Only 'main' branch can deploy to production"
-echo "  - Protects accidental deployments from feature branches"
-echo ""
-
-# Step 4: List and Display Created Environments
-echo "Step 4: Verifying environments..."
-echo ""
-
-echo "Retrieving environment details..."
-STAGING_INFO=$(gh api repos/$REPO/environments/$STAGING_ENV)
-PROD_INFO=$(gh api repos/$REPO/environments/$PRODUCTION_ENV)
-
-echo "✓ Environments verified and ready"
+echo "  ✓ Only 'main' branch can deploy to production"
 echo ""
 
 # Summary
 echo "=========================================="
-echo "Configuration Complete!"
+echo "Environments — Complete!"
 echo "=========================================="
 echo ""
-echo "Environments Summary:"
+echo "  STAGING"
+echo "    Reviewers: None"
+echo "    Wait timer: 0 min"
+echo "    Branches: Any"
 echo ""
-echo "1. STAGING ($STAGING_ENV)"
-echo "   - Reviewers required: No"
-echo "   - Wait timer: 0 minutes"
-echo "   - Purpose: Testing and QA"
+echo "  PRODUCTION"
+echo "    Reviewers: You (nitin4613)"
+echo "    Wait timer: 5 min"
+echo "    Branches: main only"
 echo ""
-echo "2. PRODUCTION ($PRODUCTION_ENV)"
-echo "   - Reviewers required: Yes (1 minimum)"
-echo "   - Wait timer: 5 minutes"
-echo "   - Allowed branches: main only"
-echo "   - Purpose: Production deployments"
-echo ""
-echo "Repository: $REPO"
-echo ""
-echo "Next Steps:"
-echo "  1. Set required reviewers in GitHub UI for production"
-echo "  2. Configure deployment secrets for each environment"
-echo "  3. Update CI/CD workflows to use these environments"
-echo "  4. Test deployment flow in staging first"
+echo "  Verify at: https://github.com/$REPO/settings/environments"
 echo ""
