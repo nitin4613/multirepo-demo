@@ -1,5 +1,5 @@
 # Build stage - uses Gradle to build the JAR
-FROM gradle:8.12-jdk21 AS builder
+FROM gradle:9.4-jdk21 AS builder
 
 WORKDIR /app
 
